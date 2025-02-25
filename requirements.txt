@@ -7,3 +7,9 @@ python-dotenv
 pymisp
 urllib3
 rich
+tenacity
+pytz
+validators
+tldextract
+hashid
+pydantic

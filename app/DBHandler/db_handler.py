@@ -1,13 +1,14 @@
 import sqlite3
 from sqlite3 import Error
+from vt import url_id  # For interacting with URLs in VirusTotal
 
-from vt import url_id  # for interacting with urls in VirusTotal
-
+# Constants
 IPV4_PUBLIC_TYPE = "PUBLIC IPV4"
 NOT_FOUND_ERROR = "Not found"
 NO_LINK = "No link"
 NO_HTTP_CERT = "No https certificate found"
 
+# Database schema for creating tables
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS urls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,21 +85,21 @@ CREATE TABLE IF NOT EXISTS domains (
 class DBHandler:
     def create_connection(self, db_file):
         """Create a database connection to a SQLite database"""
-        conn = None
         try:
             conn = sqlite3.connect(db_file)
+            return conn
         except Error as e:
             print(f"Error connecting to SQLite database: {e}")
-        return conn
+            return None
 
     def create_schema(self, conn):
         """Create tables in the SQLite database"""
-        try:
-            c = conn.cursor()
-            c.executescript(SCHEMA)
-            print("Database schema created.")
-        except Error as e:
-            print(f"Error creating schema: {e}")
+        if conn:
+            try:
+                c = conn.cursor()
+                c.executescript(SCHEMA)
+            except Error as e:
+                print(f"Error creating schema: {e}")
 
     def close_connection(self, conn):
         """Close the database connection"""
@@ -106,263 +107,86 @@ class DBHandler:
             conn.close()
             print("SQLite database connection closed.")
 
-    def insert_ip_data(self, conn, ip_data):
-        """Insert IP data into the ips table"""
-        sql = """INSERT INTO ips(ip, malicious_score, total_scans, tags, link, owner, location, network, https_certificate, regional_internet_registry, asn)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?)"""
+    def _insert_data(self, conn, table_name, data, columns):
+        """Insert data into the specified table if it doesn't already exist, and handle nested info fields"""
+        columns_str = ", ".join(columns)
+        placeholders = ", ".join("?" * len(columns))
+        select_query = f"SELECT * FROM {table_name} WHERE {columns[0]} = ?"
 
+        insert_query = f"INSERT INTO {table_name}({columns_str}) VALUES({placeholders})"
+        unnested_data = data.copy()
+        # Update nested 'info' or 'info-ip' fields if present
+        if "info" in unnested_data:
+            for key, value in unnested_data["info"].items():
+                unnested_data[key] = str(value)
+            del unnested_data["info"]
+
+        if "info-ip" in unnested_data:
+            for key, value in unnested_data["info-ip"].items():
+                unnested_data[key] = str(value)
+            del unnested_data["info-ip"]
         try:
             cur = conn.cursor()
+            cur.execute(select_query, (data[columns[0]],))  # Check if the record already exists
 
-            # Check if the entry already exists in the database
-            cur.execute("SELECT * FROM ips WHERE ip=?", (ip_data.get("ip"),))
-            result = cur.fetchone()
-            if result:
-                return
-
-            # Insert new IP data
-            cur.execute(
-                sql,
-                (
-                    str(ip_data.get("ip")),
-                    str(ip_data.get("malicious_score")),
-                    str(ip_data.get("total_scans")),
-                    str(ip_data.get("tags")),
-                    str(ip_data.get("link")),
-                    str(ip_data.get("owner")),
-                    str(ip_data.get("location")),
-                    str(ip_data.get("network")),
-                    str(ip_data.get("https_certificate")),
-                    str(ip_data["info-ip"].get("regional_internet_registry")),
-                    str(ip_data["info-ip"].get("asn")),
-                ),
-            )
-
-            conn.commit()  # Commit transaction
+            if not cur.fetchone():  # If the record doesn't exist, insert it
+                cur.execute(insert_query, tuple(str(unnested_data[col]) for col in columns))
+                conn.commit()
+            cur.close()
         except Exception as e:
-            conn.rollback()  # Rollback transaction on error
-            print(f"Error inserting IP data: {e}")
-        finally:
-            cur.close()  # Close cursor
+            conn.rollback()
+            print(f"Error inserting data into {table_name}: {e}")
+            cur.close()
 
+
+    def insert_ip_data(self, conn, ip_data):
+        """Insert IP data into the ips table"""
+        columns = ["ip", "malicious_score", "total_scans", "tags", "link", "owner", 
+                   "location", "network", "https_certificate", "regional_internet_registry", "asn"]
+        self._insert_data(conn, "ips", ip_data, columns)
 
     def insert_domain_data(self, conn, domain_data):
         """Insert domain data into the domains table"""
-        sql = """INSERT INTO domains(domain, malicious_score,
-                total_scans,tags, link, creation_date, reputation, whois, last_analysis_results, last_analysis_stats,
-                last_dns_records, last_https_certificate, registrar)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+        columns = ["domain", "malicious_score", "total_scans", "tags", "link", "creation_date",
+                   "reputation", "whois", "last_analysis_results", "last_analysis_stats",
+                   "last_dns_records", "last_https_certificate", "registrar"]
+        self._insert_data(conn, "domains", domain_data, columns)
 
-        try:
-            cur = conn.cursor()
-
-            # Check if the entry already exists in the database
-            cur.execute("SELECT * FROM domains WHERE domain=?", (domain_data.get("domain"),))
-            result = cur.fetchone()
-            if result:
-                return
-
-            # Insert new domain data
-            cur.execute(
-                sql,
-                (
-                    domain_data.get("domain"),
-                    domain_data.get("malicious_score"),
-                    domain_data.get("total_scans"),
-                    domain_data.get("tags"),
-                    domain_data.get("link"),
-                    domain_data.get("creation_date"),
-                    domain_data.get("reputation"),
-                    domain_data.get("whois"),
-                    str(domain_data["info"].get("last_analysis_results")),
-                    str(domain_data["info"].get("last_analysis_stats")),
-                    str(domain_data["info"].get("last_dns_records")),
-                    domain_data["info"].get("last_https_certificate"),
-                    domain_data["info"].get("registrar"),
-                ),
-            )
-
-            conn.commit()  # Commit transaction
-        except Exception as e:
-            conn.rollback()  # Rollback transaction on error
-            print(f"Error inserting domain data: {e}")
-        finally:
-            cur.close()  # Close cursor
-        
     def insert_url_data(self, conn, url_data):
         """Insert URL data into the urls table"""
-        sql = """INSERT INTO urls(url, malicious_score, 
-                    total_scans, tags, link, title, final_url, first_scan, metadatas, targeted, links, redirection_chain, trackers)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"""
-
-        try:
-            cur = conn.cursor()
-
-            # Check if the entry already exists in the database
-            cur.execute("SELECT * FROM urls WHERE url=?", (url_data.get("url"),))
-            result = cur.fetchone()
-            if result:
-                return
-
-            # Insert new URL data
-            cur.execute(
-                sql,
-                (
-                    url_data.get("url"),
-                    url_data.get("malicious_score"),
-                    url_data.get("total_scans"),
-                    url_data.get("tags"),
-                    url_data.get("link"),
-                    url_data.get("title"),
-                    url_data.get("final_url"),
-                    url_data.get("first_scan"),
-                    str(url_data["info"].get("metadatas")),
-                    url_data["info"].get("targeted"),
-                    str(url_data["info"].get("links")),
-                    str(url_data["info"].get("redirection_chain")),
-                    str(url_data["info"].get("trackers")),
-                ),
-            )
-
-            conn.commit()  # Commit transaction
-        except Exception as e:
-            conn.rollback()  # Rollback transaction on error
-            print(f"Error inserting URL data: {e}")
-        finally:
-            cur.close()  # Close cursor
+        columns = ["url", "malicious_score", "total_scans", "tags", "link", "title", 
+                   "final_url", "first_scan", "metadatas", "targeted", "links", 
+                   "redirection_chain", "trackers"]
+        self._insert_data(conn, "urls", url_data, columns)
 
     def insert_hash_data(self, conn, hash_data):
         """Insert hash data into the hashes table"""
-        sql = """INSERT INTO hashes(hash, malicious_score, 
-                total_scans, tags,threat_category,threat_labels,link, extension, size, md5, sha1, sha256, ssdeep, tlsh, meaningful_name, names, type, type_probability)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+        columns = ["hash", "malicious_score", "total_scans", "tags", "threat_category", 
+                   "threat_labels", "link", "extension", "size", "md5", "sha1", "sha256", 
+                   "ssdeep", "tlsh", "meaningful_name", "names", "type", "type_probability"]
+        self._insert_data(conn, "hashes", hash_data, columns)
+
+    def exists(self, conn, table, value, column="ip"):
+        """Check if a value exists in the database"""
         try:
             cur = conn.cursor()
-
-            # Check if the entry already exists in the database
-            cur.execute("SELECT * FROM hashes WHERE hash=? OR md5=? OR sha1=?", (hash_data.get("hash"), hash_data.get("hash"), hash_data.get("hash")))
+            query = f"SELECT * FROM {table} WHERE {column} = ?"
+            cur.execute(query, (value,))
             result = cur.fetchone()
-            if result:
-                return
-
-            # Insert new hash data
-            cur.execute(
-                sql,
-                (
-                    hash_data.get("hash"),
-                    hash_data.get("malicious_score"),
-                    hash_data.get("total_scans"),
-                    hash_data.get("tags"),
-                    hash_data.get("threat_category"),
-                    hash_data.get("threat_labels"),
-                    hash_data.get("link"),
-                    hash_data.get("extension"),
-                    hash_data.get("size"),
-                    hash_data.get("md5"),
-                    hash_data.get("sha1"),
-                    hash_data.get("sha256"),
-                    hash_data.get("ssdeep"),
-                    hash_data.get("tlsh"),
-                    hash_data.get("meaningful_name"),
-                    hash_data.get("names"),
-                    hash_data.get("type"),
-                    hash_data.get("type_probability"),
-                ),
-            )
-
-            conn.commit()  # Commit transaction
+            cur.close()
+            return result is not None
         except Exception as e:
-            conn.rollback()  # Rollback transaction on error
-            print(f"Error inserting hash data: {e}")
-        finally:
-            cur.close()  # Close cursor
-
-    def ip_exists(self, ip, conn):
-        """Check if an IP exists in the database"""
-        query = "SELECT * FROM ips WHERE ip = ?"
-        
-        try:
-            cur = conn.cursor()
-            cur.execute(query, (ip,))   
-            result = cur.fetchone()
-            cur.close()  # Close the cursor after use
-            return result if result else None
-        except Exception as e:
-            # Handle exception (logging, re-raising, etc.)
-            print(f"An error occurred: {e}")
-            return None
-
-    def domain_exists(self, domain, conn):
-        """Check if a domain exists in the database"""
-        query = "SELECT * FROM domains WHERE domain = ?"
-        
-        try:
-            cur = conn.cursor()
-            cur.execute(query, (domain,))
-            result = cur.fetchone()
-            cur.close()  # Close the cursor after use
-            return result if result else None
-        except Exception as e:
-            # Handle exception (logging, re-raising, etc.)
-            print(f"An error occurred: {e}")
-            return None
-
-    def url_exists(self, url, conn):
-        """Check if a URL exists in the database"""
-        query = "SELECT * FROM urls WHERE url = ?"
-        
-        try:
-            cur = conn.cursor()
-            cur.execute(query, (url,))
-            result = cur.fetchone()
-            cur.close()  # Close the cursor after use
-            return result if result else None
-        except Exception as e:
-            # Handle exception (logging, re-raising, etc.)
-            print(f"An error occurred: {e}")
-            return None
-
-    def hash_exists(self, hash, conn):
-        """Check if a hash exists in the database"""
-        query = """
-        SELECT * FROM hashes 
-        WHERE hash = ? OR md5 = ? OR sha1 = ?
-        """
-        
-        try:
-            cur = conn.cursor()
-            cur.execute(query, (hash, hash, hash))
-            result = cur.fetchone()
-            cur.close()  # Close the cursor after use
-            return result if result else None
-        except Exception as e:
-            # Handle exception (logging, re-raising, etc.)
-            print(f"An error occurred: {e}")
-            return None
+            print(f"Error checking existence in {table}: {e}")
+            return False
 
     def get_report(self, value, value_type, conn):
-        """
-        Get the report for a value.
-
-        Parameters:
-        value_type (str): The type of value.
-        value (str): The value to get the report for.
-
-        Returns:
-        dict: The report for the value.
-        """
-        # Get the report for the value
-        
+        """Retrieve the report for a given value"""
         report = self.create_report(value_type, value, conn)
         if report:
-            # Generate CSV report
             csv_report = self.csv_report(value_type, value, report)
-            # Get rows for the report
             rows = self.get_rows(value_type, value, report)
-            # Construct the final results dictionary
-            results = {"report": report, "csv_report": csv_report, "rows": rows}
-
-            return results
+            return {"report": report, "csv_report": csv_report, "rows": rows}
+        return None
 
     def create_report(self, value_type, value, conn):
         """Fetch a report from the database based on value_type and value"""
@@ -371,7 +195,6 @@ class DBHandler:
 
         cursor = conn.cursor()
         report = None
-
         try:
             if value_type == IPV4_PUBLIC_TYPE:
                 cursor.execute("SELECT * FROM ips WHERE ip = ?", (value,))
@@ -380,204 +203,109 @@ class DBHandler:
             elif value_type == "URL":
                 cursor.execute("SELECT * FROM urls WHERE url = ?", (value,))
             elif value_type in ["SHA-256", "SHA-1", "MD5"]:
-                cursor.execute("SELECT * FROM hashes WHERE hash = ? OR md5 = ? OR sha1 = ?", (value,value,value))
+                cursor.execute("SELECT * FROM hashes WHERE hash = ? OR md5 = ? OR sha1 = ?", (value, value, value))
 
             report = cursor.fetchone()
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f"An error occurred while fetching the report: {e}")
         finally:
             cursor.close()
 
         return report
 
     def csv_report(self, value_type, value, report):
-        """
-        Create a CSV report for a value.
-
-        Parameters:
-        value_type (str): The type of value.
-        value (str): The value to create a report for.
-        report (dict): The report for the value.
-
-        Returns:
-        List[Dict[str, str]]: The CSV report for the value.
-        """
-        # Create a CSV report for the value
+        """Generate a CSV report from the fetched report"""
         csv_object = self.create_object(value_type, value, report)
-        csv_report = [csv_object]
-
-        return csv_report
+        return [csv_object]
 
     def create_object(self, value_type, value, report):
-        if value_type == "SHA-256" or value_type == "SHA-1" or value_type == "MD5":
-            value_object = {
-                "malicious_score": NOT_FOUND_ERROR,
-                "total_scans": NOT_FOUND_ERROR,
-                "tags": NOT_FOUND_ERROR,
-                "threat_category": NOT_FOUND_ERROR,
-                "threat_labels": NOT_FOUND_ERROR,
-                "link": NOT_FOUND_ERROR,
-            }
-        else:
-            value_object = {
-            "malicious_score": NOT_FOUND_ERROR,
-            "total_scans": NOT_FOUND_ERROR,
-            "tags": NOT_FOUND_ERROR,
-            "link": NO_LINK,
-        }
+        """Create an object to represent the report"""
+        value_object = {"malicious_score": NOT_FOUND_ERROR, "total_scans": NOT_FOUND_ERROR, 
+                        "tags": NOT_FOUND_ERROR, "link": NO_LINK}
+
         if report != NOT_FOUND_ERROR and report:
-            total_scans = report[3]
-            malicious = report[2]
-            tags = report[4]
-            self.populate_scores(
-                value_object, total_scans, malicious
-            )
+            self.populate_scores(value_object, report)
             self.populate_link(value_object, value, value_type)
-            self.populate_tags(value_object, tags)
+            self.populate_tags(value_object, report[4])
             if value_type == IPV4_PUBLIC_TYPE:
-                self.populate_ip_data(value_object, value, report)
+                self.populate_ip_data(value_object, report)
             elif value_type == "DOMAIN":
-                self.populate_domain_data(value_object, value, report)
+                self.populate_domain_data(value_object, report)
             elif value_type == "URL":
-                self.populate_url_data(value_object, value, report)
-            elif (
-                value_type == "SHA-256" or value_type == "SHA-1" or value_type == "MD5"
-            ):
-                self.populate_hash_data(value_object, value, report)
-            
-            if value_type == "SHA-256" or value_type == "SHA-1" or value_type == "MD5":
-                value_object["threat_category"] = report[5]
-                value_object["threat_labels"] = report[6]
-            
-            
-            
+                self.populate_url_data(value_object, report)
+            elif value_type in ["SHA-256", "SHA-1", "MD5"]:
+                self.populate_hash_data(value_object, report)
+
         return value_object
 
-    def populate_tags( self, value_object, tags):       
-        value_object["tags"] = tags
-        
-    def populate_scores(
-        self, value_object, total_scans, malicious
-    ):
-        value_object["malicious_score"] = malicious
-        value_object["total_scans"] = total_scans
+    def populate_scores(self, value_object, report):
+        """Populate malicious score and total scans"""
+        value_object["malicious_score"] = report[2]
+        value_object["total_scans"] = report[3]
 
     def populate_link(self, value_object, value, value_type):
+        """Populate the link for the report"""
         if value_type == "URL":
             value_object["link"] = f"https://www.virustotal.com/gui/url/{url_id(value)}"
         else:
             value_object["link"] = f"https://www.virustotal.com/gui/search/{value}"
 
-    def populate_ip_data(self, value_object, value, report):
-        """
-        Populate IP-related data into the given value_object based on the report.
+    def populate_tags(self, value_object, tags):
+        """Populate tags for the report"""
+        value_object["tags"] = tags
 
-        Parameters:
-        - value_object (dict): The dictionary to populate with IP data.
-        - value (str): The IP address.
-        - report (tuple or list): A tuple or list containing IP-related information.
-
-        Note:
-        - Assumes report structure: (owner, location, network, https_certificate,
-        regional_internet_registry, asn)
-        """
+    def populate_ip_data(self, value_object, report):
+        """Populate IP-related data"""
         value_object.update({
-            "ip": value,
             "owner": report[6],
             "location": report[7],
             "network": report[8],
             "https_certificate": report[9],
-            "info-ip": {
-                "regional_internet_registry": report[10],
-                "asn": report[11],
-            },
+            "regional_internet_registry": report[10],
+            "asn": report[11]
         })
 
-    def populate_domain_data(self, value_object, value, report):
-        """
-        Populate domain-related data into the given value_object based on the report.
-
-        Parameters:
-        - value_object (dict): The dictionary to populate with domain data.
-        - value (str): The domain name.
-        - report (tuple or list): A tuple or list containing domain-related information.
-
-        Note:
-        - Assumes report structure: (creation_date, reputation, whois,
-        last_analysis_results, last_analysis_stats, last_dns_records,
-        last_https_certificate, registrar)
-        """
+    def populate_domain_data(self, value_object, report):
+        """Populate domain-related data"""
         value_object.update({
-            "domain": value,
             "creation_date": report[6],
             "reputation": report[7],
             "whois": report[8],
-            "info": {
-                "last_analysis_results": report[9],
-                "last_analysis_stats": report[10],
-                "last_dns_records": report[11],
-                "last_https_certificate": report[12],
-                "registrar": report[13],
-            },
+            "last_analysis_results": report[9],
+            "last_analysis_stats": report[10],
+            "last_dns_records": report[11],
+            "last_https_certificate": report[12],
+            "registrar": report[13]
         })
 
-    def populate_url_data(self, value_object, value, report):
-        """
-        Populate URL-related data into the given value_object based on the report.
-
-        Parameters:
-        - value_object (dict): The dictionary to populate with URL data.
-        - value (str): The URL.
-        - report (tuple or list): A tuple or list containing URL-related information.
-
-        Note:
-        - Assumes report structure: (title, final_url, first_scan,
-        metadatas, targeted, links, redirection_chain, trackers)
-        """
+    def populate_url_data(self, value_object, report):
+        """Populate URL-related data"""
         value_object.update({
-            "url": value,
             "title": report[6],
             "final_url": report[7],
             "first_scan": report[8],
-            "info": {
-                "metadatas": report[9],
-                "targeted": report[10],
-                "links": report[11],
-                "redirection_chain": report[12],
-                "trackers": report[13],
-            },
+            "metadatas": report[9],
+            "targeted": report[10],
+            "links": report[11],
+            "redirection_chain": report[12],
+            "trackers": report[13]
         })
 
-    def populate_hash_data(self, value_object, value, report):
-        """
-        Populate hash-related data into the given value_object based on the report.
-        
-        Parameters:
-        - value_object (dict): The dictionary to populate with hash data.
-        - value (str): The hash value.
-        - report (tuple or list): A tuple or list containing hash-related information.
-        
-        Note:
-        - Assumes report structure: (extension, size, md5, sha1, sha256, ssdeep, tlsh, 
-        names, type, type_probability)
-        """
-        value_object.update(
-            {
-                "hash": value,
-                "extension": report[8],
-                "size": report[9],
-                "md5": report[10],
-                "sha1": report[11],
-                "sha256": report[12],
-                "ssdeep": report[13],
-                "tlsh": report[14],
-                "meaningful_name": report[15],
-                "names": report[16],
-                "type": report[17],
-                "type_probability": report[18],
-            }
-            
-        )
+    def populate_hash_data(self, value_object, report):
+        """Populate hash-related data"""
+        value_object.update({
+            "extension": report[7],
+            "size": report[8],
+            "md5": report[9],
+            "sha1": report[10],
+            "sha256": report[11],
+            "ssdeep": report[12],
+            "tlsh": report[13],
+            "meaningful_name": report[14],
+            "names": report[15],
+            "type": report[16],
+            "type_probability": report[17]
+        })
 
     def get_rows(self, value_type, value, report):
         """

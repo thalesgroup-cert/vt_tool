@@ -1,156 +1,168 @@
-import os  # for interacting with the operating system
-from datetime import timezone  # for working with dates and times
+import os
+import logging
+from pathlib import Path
+from typing import List, Optional, Literal, Union
+from datetime import datetime, timezone  # for working with dates and times
+from pytz import timezone as pytz_timezone
 
 from rich.console import Console
-from rich.prompt import InvalidResponse, Prompt
+from rich.prompt import Prompt, InvalidResponse
 from rich.table import Table
-from rich.text import Text
 
 console = Console()
 
+ANALYSIS_OPTIONS = {
+    "1": "IPs",
+    "2": "Domains",
+    "3": "URLs",
+    "4": "Hashes"
+}
 
-def utc2local(utc):
+ALL_ANALYSIS_TYPES = ["ips", "domains", "urls", "hashes"]
+
+logger = logging.getLogger(__name__)
+
+def utc2local(utc: Union[datetime, str]) -> datetime:
     """
     Convert UTC time to local time.
 
     Parameters:
-    utc (datetime): The UTC time to convert.
+    - utc (datetime | str): The UTC time to convert (can be a `datetime` or an ISO 8601 string).
 
     Returns:
-    datetime: The local time.
+    - datetime: The converted local time.
     """
-    return utc.replace(tzinfo=timezone.utc).astimezone(tz=None)
+    if isinstance(utc, str):
+        utc = datetime.fromisoformat(utc)  # Allows ISO 8601 string input
+
+    if not isinstance(utc, datetime):
+        raise ValueError("Invalid input: utc must be a datetime object or ISO 8601 string.")
+
+    return utc.replace(tzinfo=timezone.utc).astimezone(pytz_timezone("localtime"))
 
 
-def get_api_key(api_key: str = None, api_key_file: str = None) -> str:
+def get_api_key(api_key: Optional[str] = None, api_key_file: Optional[str] = None, env_var: str = "VTAPIKEY") -> str:
     """
-    Get the API key.
+    Retrieve the API key from the provided argument, a file, or an environment variable.
 
     Parameters:
-    api_key (str, optional): The API key.
-    api_key_file (str, optional): The file containing the API key.
+    - api_key (Optional[str]): Directly provided API key.
+    - api_key_file (Optional[str]): Path to a file containing the API key.
+    - env_var (str): Environment variable name to retrieve the API key from (default: "VTAPIKEY").
 
     Returns:
-    str: The API key.
+    - str: The API key.
+
+    Raises:
+    - FileNotFoundError: If the specified API key file does not exist.
+    - ValueError: If no API key is found.
     """
-    # Check if API key is provided directly
+
     if api_key:
         return api_key
 
-    # Check if API key is provided via a file
-    elif api_key_file:
-        try:
-            with open(api_key_file, "r") as f:
-                return f.read().strip()
-        except FileNotFoundError:
-            print(f"API key file '{api_key_file}' not found.")
-            exit()
+    if api_key_file:
+        key_path = Path(api_key_file)
+        if key_path.is_file():
+            return key_path.read_text(encoding="utf-8").strip()
+        else:
+            logger.error("API key file '%s' not found.", api_key_file)
+            raise FileNotFoundError(f"API key file '{api_key_file}' not found.")
 
-    # Check if API key is provided via environment variable
-    elif os.getenv("VTAPIKEY"):
-        return os.getenv("VTAPIKEY")
+    env_api_key = os.getenv(env_var)
+    if env_api_key:
+        return env_api_key
 
-    # No API key provided, print error and exit
-    else:
-        print("No API key provided.")
-        exit()
+    raise ValueError("No API key provided. Please specify an API key, a key file, or set the environment variable.")
 
 
-def get_proxy(proxy: str = None) -> str:
+def get_proxy(proxy: Optional[str] = None, env_var: str = "PROXY") -> str:
     """
-    Get the proxy.
+    Retrieve the proxy from the provided argument or an environment variable.
 
     Parameters:
-    proxy (str, optional): The proxy.
+    - proxy (Optional[str]): Directly provided proxy.
+    - env_var (str): Environment variable name to retrieve the proxy from (default: "PROXY").
 
     Returns:
-    str: The proxy.
+    - str: The proxy.
+
+    Raises:
+    - ValueError: If no proxy is found.
     """
-    # Check if proxy is provided directly
+
     if proxy:
         return proxy
 
-    # Check if proxy is provided via environment variable
-    elif os.getenv("PROXY"):
-        return os.getenv("PROXY")
+    env_proxy = os.getenv(env_var)
+    if env_proxy:
+        return env_proxy
 
-    # No proxy provided, print error and return None
-    else:
-        print("No Proxy provided.")
-        return ""
+    logger.error("No proxy provided. Please specify a proxy or set the environment variable.")
 
 
-def display_menu():
+def display_menu() -> str:
     """
-    Display the analysis type menu.
+    Display the analysis type menu and get user selection.
+
+    Returns:
+    - str: The selected option key.
     """
     table = Table(title="Analysis Types", title_style="bold yellow")
     table.add_column("Key", justify="center", style="cyan", no_wrap=True)
     table.add_column("Type", justify="center", style="magenta")
 
-    options = {"1": "IPs", "2": "Domains", "3": "URLs", "4": "Hashes"}
-
-    for key, value in options.items():
+    for key, value in ANALYSIS_OPTIONS.items():
         table.add_row(key, value)
 
     console.print(table)
 
+    choice = Prompt.ask(
+        "[bold green]Select an option[/bold green]",
+        choices=ANALYSIS_OPTIONS.keys(),
+        default="1"
+    )
 
-def get_initial_choice():
+    return choice
+
+
+def get_initial_choice() -> Literal["y", "n"]:
     """
     Get the initial choice from the user.
 
     Returns:
-    str: The user's initial choice (y/n).
+    - Literal["y", "n"]: The user's choice ('y' for yes, 'n' for no).
     """
-    return (
-        Prompt.ask(
-            "[bold]Do you want to analyze a particular type? (y/n)[/bold]",
-            choices=["y", "n", "yes", "no", "Y", "N"],
-            default="n",
-        )
-        .strip()
-        .lower()
-    )
+    choice = Prompt.ask(
+        "[bold green]Do you want to analyze a specific type? (y/n)[/bold green]",
+        choices=["y", "n", "yes", "no"],
+        default="n",
+    ).strip().lower()
+
+    return "y" if choice in {"y", "yes"} else "n"
 
 
-def get_analysis_type():
+def get_analysis_type() -> Literal["ips", "domains", "urls", "hashes"]:
     """
     Get the analysis type from the user.
 
     Returns:
-    str: The analysis type selected by the user.
+    - Literal["ips", "domains", "urls", "hashes"]: The selected analysis type.
     """
-    while True:
-        display_menu()
-        choice = (
-            Prompt.ask("[bold]Which type do you want to analyze? [/bold]")
-            .strip()
-            .lower()
-        )
-        mapping = {"1": "ips", "2": "domains", "3": "urls", "4": "hashes"}
-        value_type = mapping.get(choice)
-        if value_type:
-            return value_type
-        console.print(
-            "[bold red]Invalid choice. Please select a valid type.[/bold red]"
-        )
+    choice = display_menu()
+
+    return ANALYSIS_OPTIONS[choice].lower()
 
 
-def get_user_choice():
+def get_user_choice() -> List[Literal["ips", "domains", "urls", "hashes"]]:
     """
-    Get the user's choice and return the selected value types.
+    Get the user's choice and return the selected analysis types.
 
     Returns:
-    list: The selected value types.
+    - List[Literal["ips", "domains", "urls", "hashes"]]: The selected analysis types.
     """
     try:
-        choice = get_initial_choice()
-
-        if choice == "y":
-            return [get_analysis_type()]
-        return ["ips", "domains", "urls", "hashes"]
-
+        return [get_analysis_type()] if get_initial_choice() == "y" else ALL_ANALYSIS_TYPES
     except InvalidResponse:
         console.print("[bold red]Invalid response. Defaulting to all types.[/bold red]")
-        return ["ips", "domains", "urls", "hashes"]
+        return ALL_ANALYSIS_TYPES
