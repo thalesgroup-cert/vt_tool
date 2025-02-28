@@ -1,6 +1,7 @@
 import os  # for interacting with the operating system
 import re  # for working with regular expressions
 import sys  # for interacting with the Python interpreter
+import csv
 from collections import defaultdict, Counter
 from dataclasses import dataclass
 from typing import Dict, List, Callable
@@ -271,6 +272,33 @@ class ValueReader:
             # Catch any I/O or unexpected errors
             print(f"Error reading file {self.fname}: {e}")
             return self._get_empty_values()
+        
+    def read_from_csv_file(self) -> dict:
+        """
+        Read values from a CSV file and extract them using the ValueExtractor class.
+
+        Returns:
+            dict: A dictionary with keys 'ips', 'urls', 'hashes', 'keys', and 'domains'.
+                  The values corresponding to these keys are lists of extracted values from the file.
+        """
+        # Check if the filename is provided
+        if not self.fname:
+            print("No file name provided")
+            return self._get_empty_values()
+
+        # Check if the file exists
+        if not os.path.isfile(self.fname):
+            print(f"File {self.fname} does not exist")
+            return self._get_empty_values()
+
+        try:
+            csv_values = defaultdict(list)
+            exit("CSV file reading not implemented yet")
+
+        except (IOError, Exception) as e:
+            # Catch any I/O or unexpected errors
+            print(f"Error reading file {self.fname}: {e}")
+            return self._get_empty_values
 
     def _process_file_lines(self, value_extractor: ValueExtractor):
         """
@@ -299,6 +327,25 @@ class ValueReader:
         Returns a dictionary with empty lists for 'ips', 'urls', 'hashes', 'keys', and 'domains'.
         """
         return {"ips": [], "urls": [], "hashes": [], "keys": [], "domains": []}
+
+    def read_template_values(self,template) -> dict:
+        """
+        Read values from standard input and file, remove duplicates and None values, 
+        and extract domains. Returns a dictionary with the extracted values.
+
+        Returns:
+            dict: A dictionary with 'ips', 'urls', 'hashes', 'domains' as keys, each
+                  containing a list of unique extracted values.
+        """
+        # Read values from standard input and file
+        stdin_values = self.read_from_stdin()
+        file_values = self.read_from_csv_file()
+
+        # Combine values and remove duplicates and None values
+        combined_values = self._combine_and_clean_values(stdin_values, file_values)
+
+        # Return the final cleaned dictionary
+        return self._extract_and_filter_domains(combined_values)
 
     def read_values(self) -> dict:
         """

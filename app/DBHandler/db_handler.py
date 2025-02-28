@@ -111,31 +111,35 @@ class DBHandler:
         """Insert data into the specified table if it doesn't already exist, and handle nested info fields"""
         columns_str = ", ".join(columns)
         placeholders = ", ".join("?" * len(columns))
+
         select_query = f"SELECT * FROM {table_name} WHERE {columns[0]} = ?"
-
         insert_query = f"INSERT INTO {table_name}({columns_str}) VALUES({placeholders})"
-        unnested_data = data.copy()
-        # Update nested 'info' or 'info-ip' fields if present
-        if "info" in unnested_data:
-            for key, value in unnested_data["info"].items():
-                unnested_data[key] = str(value)
-            del unnested_data["info"]
+        update_query = f"UPDATE {table_name} SET {', '.join(f'{col} = ?' for col in columns)} WHERE {columns[0]} = ?"
 
-        if "info-ip" in unnested_data:
-            for key, value in unnested_data["info-ip"].items():
-                unnested_data[key] = str(value)
-            del unnested_data["info-ip"]
+        unnested_data = data.copy()
+
+        # Update nested 'info' or 'info-ip' fields if present
+        for key in ["info", "info-ip"]:
+            if key in unnested_data:
+                for sub_key, value in unnested_data[key].items():
+                    unnested_data[sub_key] = str(value)
+                del unnested_data[key]
+
         try:
             cur = conn.cursor()
             cur.execute(select_query, (data[columns[0]],))  # Check if the record already exists
 
+            values = tuple(str(unnested_data[col]) for col in columns)
             if not cur.fetchone():  # If the record doesn't exist, insert it
-                cur.execute(insert_query, tuple(str(unnested_data[col]) for col in columns))
-                conn.commit()
+                cur.execute(insert_query, values)
+            else:
+                cur.execute(update_query, values + (data[columns[0]],))  # Append WHERE column value
+
+            conn.commit()
             cur.close()
         except Exception as e:
             conn.rollback()
-            print(f"Error inserting data into {table_name}: {e}")
+            print(f"Error inserting/updating data into {table_name}: {e}")
             cur.close()
 
 
@@ -166,18 +170,43 @@ class DBHandler:
                    "ssdeep", "tlsh", "meaningful_name", "names", "type", "type_probability"]
         self._insert_data(conn, "hashes", hash_data, columns)
 
-    def exists(self, conn, table, value, column="ip"):
-        """Check if a value exists in the database"""
+    def exists(self, conn, table, value, column="ip", threshold=0.8):
+        """Check if a value exists in the database, but return None if most other columns contain 'Not Found'."""
         try:
             cur = conn.cursor()
             query = f"SELECT * FROM {table} WHERE {column} = ?"
             cur.execute(query, (value,))
             result = cur.fetchone()
-            cur.close()
-            return result is not None
+
+            if result:
+                # Get column names from cursor description
+                col_names = [desc[0] for desc in cur.description]
+
+                # Create a dictionary of column values
+                result_dict = dict(zip(col_names, result))
+
+                # Exclude 'id' and searched column from the check
+                excluded_keys = {"id", column}
+                filtered_values = [result_dict[key] for key in result_dict if key not in excluded_keys]
+
+                # Count occurrences of "Not Found"
+                not_found_count = sum(1 for value in filtered_values if value == "Not Found")
+                not_found_ratio = not_found_count / len(filtered_values) if filtered_values else 0
+
+                # Return None if the ratio of "Not Found" exceeds the threshold
+                if not_found_ratio >= threshold:
+                    return False
+
+                return True
+
+            return False
         except Exception as e:
             print(f"Error checking existence in {table}: {e}")
             return False
+        finally:
+            cur.close()
+
+
 
     def get_report(self, value, value_type, conn):
         """Retrieve the report for a given value"""
@@ -228,13 +257,13 @@ class DBHandler:
             self.populate_link(value_object, value, value_type)
             self.populate_tags(value_object, report[4])
             if value_type == IPV4_PUBLIC_TYPE:
-                self.populate_ip_data(value_object, report)
+                self.populate_ip_data(value, value_object, report)
             elif value_type == "DOMAIN":
-                self.populate_domain_data(value_object, report)
+                self.populate_domain_data(value, value_object, report)
             elif value_type == "URL":
-                self.populate_url_data(value_object, report)
+                self.populate_url_data(value, value_object, report)
             elif value_type in ["SHA-256", "SHA-1", "MD5"]:
-                self.populate_hash_data(value_object, report)
+                self.populate_hash_data(value, value_object, report)
 
         return value_object
 
@@ -254,57 +283,67 @@ class DBHandler:
         """Populate tags for the report"""
         value_object["tags"] = tags
 
-    def populate_ip_data(self, value_object, report):
+    def populate_ip_data(self, value, value_object, report):
         """Populate IP-related data"""
         value_object.update({
+            "ip": value,
             "owner": report[6],
             "location": report[7],
             "network": report[8],
             "https_certificate": report[9],
-            "regional_internet_registry": report[10],
-            "asn": report[11]
+            "info-ip": {
+                "regional_internet_registry": report[10],
+                "asn": report[11]
+            },
         })
 
-    def populate_domain_data(self, value_object, report):
+    def populate_domain_data(self, value,  value_object, report):
         """Populate domain-related data"""
         value_object.update({
+            "domain": value,
             "creation_date": report[6],
             "reputation": report[7],
-            "whois": report[8],
-            "last_analysis_results": report[9],
-            "last_analysis_stats": report[10],
-            "last_dns_records": report[11],
-            "last_https_certificate": report[12],
-            "registrar": report[13]
+            "whois": [report[8]],
+            "info": {
+                "last_analysis_results": report[9],
+                "last_analysis_stats": report[10],
+                "last_dns_records": report[11],
+                "last_https_certificate": report[12],
+                "registrar": report[13]
+            },
         })
 
-    def populate_url_data(self, value_object, report):
+    def populate_url_data(self, value, value_object, report):
         """Populate URL-related data"""
         value_object.update({
+            "url": value,
             "title": report[6],
             "final_url": report[7],
             "first_scan": report[8],
-            "metadatas": report[9],
-            "targeted": report[10],
-            "links": report[11],
-            "redirection_chain": report[12],
-            "trackers": report[13]
+            "info": {
+                "metadatas": report[9],
+                "targeted": report[10],
+                "links": report[11],
+                "redirection_chain": report[12],
+                "trackers": report[13]
+            },
         })
 
-    def populate_hash_data(self, value_object, report):
+    def populate_hash_data(self, value, value_object, report):
         """Populate hash-related data"""
         value_object.update({
-            "extension": report[7],
-            "size": report[8],
-            "md5": report[9],
-            "sha1": report[10],
-            "sha256": report[11],
-            "ssdeep": report[12],
-            "tlsh": report[13],
-            "meaningful_name": report[14],
-            "names": report[15],
-            "type": report[16],
-            "type_probability": report[17]
+            "hash": value,
+            "extension": report[8],
+            "size": report[9],
+            "md5": report[10],
+            "sha1": report[11],
+            "sha256": report[12],
+            "ssdeep": report[13],
+            "tlsh": report[14],
+            "meaningful_name": report[15],
+            "names": report[16],
+            "type": report[17],
+            "type_probability": report[18]
         })
 
     def get_rows(self, value_type, value, report):

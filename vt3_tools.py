@@ -2,7 +2,7 @@ import argparse
 import sys
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import requests
 from requests.exceptions import RequestException
@@ -13,15 +13,24 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
+from rich.prompt import Prompt
+from rich.table import Table
 
 from app.DataHandler.utils import get_api_key, get_proxy, get_user_choice
 from app.FileHandler.create_table import CustomPrettyTable as cpt
 from app.FileHandler.read_file import ValueReader
-from app.MISP.vt_tools2misp import misp_choice
+from app.MISP.vt_tools2misp import misp_choice, misp_choice_template
 from init import Initializator
 
 console = Console()
 
+#TODO Add more templates
+
+TEMPLATE_OPTIONS = {
+    "1": "value,comment",
+    "2": "value,comment,source",
+    "3": "value,category,type,comment,to_ids,tag1,tag2",
+}
 
 def setup_logging() -> None:
     """Setup logging configuration."""
@@ -137,6 +146,12 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="VirusTotal Analysis Tool by THA-CERT. This tool retrieves analysis information for a set of values (IP/Hash/URL/Domains) from VirusTotal."
     )
+    
+    # Add template file argument
+    parser.add_argument(
+        "--template_file", "-t", type=str,
+        help="Template file to use for the analysis. If not provided, the default template will be used."
+    )
 
     # Add input file argument
     parser.add_argument(
@@ -186,7 +201,7 @@ def parse_arguments() -> argparse.Namespace:
         parser.print_help()
         sys.exit(1)
 
-    if not args.values and not args.input_file:
+    if not args.values and not args.input_file and not args.template_file:
         console.print("[bold red]Error: You must provide either a list of values or an input file.[/bold red]")
         parser.print_help()
         sys.exit(1)
@@ -219,7 +234,7 @@ def get_remaining_quota(api_key: str, proxy: str = None) -> int:
             allowed_hourly_queries = json_response["data"]["api_requests_hourly"]["user"]["allowed"]
             used_hourly_queries = json_response["data"]["api_requests_hourly"]["user"]["used"]
             remaining_quota = allowed_hourly_queries - used_hourly_queries
-            console.print(f"[bold green]Remaining quota: {remaining_quota} queries[/bold green]")
+            
             return remaining_quota
         else:
             # Log and console print on error response
@@ -289,7 +304,24 @@ def analyze_values(args: argparse.Namespace, value_types: List[str]) -> None:
         console.print(f"Remaining queries for this hour: {remaining_queries}")
 
         # Retrieve values to analyze
-        values = ValueReader(args.input_file, args.values).read_values()
+        if args.template_file:
+            table = Table(title="Template Types", title_style="bold yellow")
+            table.add_column("Key", justify="center", style="cyan", no_wrap=True)
+            table.add_column("Type", justify="center", style="magenta")
+
+            for key, value in TEMPLATE_OPTIONS.items():
+                table.add_row(key, value)
+
+            console.print(table)
+
+            choice = Prompt.ask(
+                "[bold green]Select an option[/bold green]",
+                choices=TEMPLATE_OPTIONS.keys(),
+                default="1"
+            )
+            values = ValueReader(args.template_file, args.values).read_template_values(TEMPLATE_OPTIONS[choice])
+        else:
+            values = ValueReader(args.input_file, args.values).read_values()
         if not values:
             console.print("[bold yellow]No values to analyze.[/bold yellow]")
             return
@@ -305,7 +337,6 @@ def analyze_values(args: argparse.Namespace, value_types: List[str]) -> None:
             console.print(
                 "[bold yellow]Some values may be skipped to avoid exceeding the quota.[/bold yellow]\n"
             )
-            return
 
         # Start the analysis process for each value type
         for value_type in value_types:
@@ -322,7 +353,7 @@ def analyze_values(args: argparse.Namespace, value_types: List[str]) -> None:
             )
 
             results, skipped_values, error_values = analyze_value_type(
-                init, value_type, values[value_type], conn
+                init, value_type, values[value_type], remaining_queries, conn
             )
             quota_saved += skipped_values
 
@@ -345,7 +376,10 @@ def analyze_values(args: argparse.Namespace, value_types: List[str]) -> None:
         console.print(f"[bold blue]Total time taken: {total_time}[/bold blue]")
 
         # MISP-related action
-        misp_choice(case_str=case_id, csvfilescreated=csv_files_created)
+        if args.template_file:
+            misp_choice_template(case_str=case_id, csvfilescreated=csv_files_created, template_file=args.template_file, template=TEMPLATE_OPTIONS[choice])
+        else:
+            misp_choice(case_str=case_id, csvfilescreated=csv_files_created)
 
         console.print("[bold green]Thank you for using VT Tools! 👍[/bold green]")
 
@@ -353,22 +387,26 @@ def analyze_values(args: argparse.Namespace, value_types: List[str]) -> None:
         close_resources(init)
 
 
-def analyze_value_type(init: Initializator, value_type: str, values: List[str], conn) -> tuple:
+def analyze_value_type(init: Initializator, value_type: str, values: List[str], remaining_queries, conn) -> tuple:
     """Analyze values of a specific type (e.g., hashes, URLs, domains)."""
     results = []
     skipped_values = 0
     error_values = 0
 
     for value in values:
-        try:
-            result, skipped, errors = analyze_single_value(init, value_type, value, conn)
-            results.extend(result)
-            skipped_values += skipped
-            error_values += errors
+        if remaining_queries == 0:
+            console.print("[bold yellow]No queries remaining for this hour.[/bold yellow]")
+            break
+        else:
+            try:
+                result, skipped, errors = analyze_single_value(init, value_type, value, conn)
+                results.extend(result)
+                skipped_values += skipped
+                error_values += errors
 
-        except Exception as e:
-            logging.error(f"Error analyzing value {value}: {e}")
-            error_values += 1
+            except Exception as e:
+                logging.error(f"Error analyzing value {value}: {e}")
+                error_values += 1
 
     return results, skipped_values, error_values
 
@@ -448,15 +486,14 @@ def validate_value(init: Initializator, value: str, value_type: str) -> str:
         console.print(f"[bold red]No validator found for value type: {value_type}[/bold red]")
     return ""
 
-
 def process_results(init: Initializator, results: List[Dict], value_type: str) -> None:
     """Process and format the analysis results for output to CSV and TXT files."""
     try:
-        # Extract rows and generate headers
-        header_rows, value_rows = extract_table_data(results)
-        # Create table string
-        table = cpt(header_rows, value_rows)
-        strtable = table.create_table()
+        # Extract headers and rows directly from JSON
+        headers, rows = extract_table_data(results)
+        # Create formatted table
+        table = cpt(headers, rows)
+        strtable = table.create_table(value_type[:-1] if value_type != "hashes" else "hash")
 
         # Generate CSV report for the analysis
         output_csv(init, results, value_type)
@@ -472,18 +509,19 @@ def process_results(init: Initializator, results: List[Dict], value_type: str) -
         console.print(f"[bold red]Error processing results: {e}[/bold red]")
 
 
-def extract_table_data(results: List[Dict]) -> tuple:
-    """Extract table data from the analysis results."""
-    header_rows = []
-    value_rows = []
-    for result in results:
-        if result:
-            for row in result.get("rows", []):
-                if row[0] not in header_rows:
-                    header_rows.append(row[0])
-                value_rows.append(row[1:])
+def extract_table_data(results: List[Dict]) -> Tuple[List[str], List[List[str]]]:
+    """Extract headers and row values directly from JSON objects."""
 
-    return header_rows, value_rows
+    headers = set()
+    rows = []
+
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        headers.update(result["csv_report"][0].keys())
+        rows.append([str(result["csv_report"][0].get(header, "")) for header in headers])
+
+    return list(headers), rows
 
 
 def output_csv(init: Initializator, results: List[Dict], value_type: str) -> None:
@@ -502,11 +540,11 @@ def output_csv(init: Initializator, results: List[Dict], value_type: str) -> Non
 def output_txt(init: Initializator, strtable: str, value_type: str) -> None:
     """Generate and save the TXT report based on the formatted table."""
     try:
-        # Prepare the filename for the TXT report
         init.output.output_to_txt(strtable, f"{value_type[:-1].upper()}" if value_type != "hashes" else "HASH")
     except Exception as e:
         logging.error(f"Error saving TXT report: {e}")
         console.print(f"[bold red]Error saving TXT report: {e}[/bold red]")
+
 
 
 def display_analysis_success_message(value_type: str) -> None:

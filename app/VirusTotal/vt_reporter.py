@@ -60,22 +60,21 @@ class VTReporter:
 
         # Ensure valid value_type and value are provided
         if value_type not in api_endpoints:
-            logger.error(f"Invalid value_type provided: {value_type}")
-            return {"error": "Invalid value type."}
+            return None
 
         try:
             # Fetch the report from VirusTotal
             report = self.vt.get_object(api_endpoints[value_type])
-            logger.info(f"Report fetched for {value_type}: {value}")
         except Exception as e:
             # Handle errors such as not found
             if "NotFoundError" in str(e):
+                report = NOT_FOUND_ERROR
                 logger.warning(f"{NOT_FOUND_ERROR} on VirusTotal Database: {value}")
             else:
                 logger.error(f"Error fetching report for {value_type}: {value} - {e}")
                 raise e
 
-        return report if report else {"error": f"No report found for {value}"}
+        return report if report else None
 
     def create_object(self, value_type, value, report):
         """
@@ -113,7 +112,7 @@ class VTReporter:
             "malicious_score": NOT_FOUND_ERROR,
             "total_scans": NOT_FOUND_ERROR,
             "tags": NOT_FOUND_ERROR,
-            "link": NO_LINK,
+            "link": NOT_FOUND_ERROR,
         }
 
         # Add specific fields for hash types
@@ -133,8 +132,13 @@ class VTReporter:
             value (str): The value (e.g., IP address, hash, URL).
             report (dict): The VirusTotal report for the value.
         """
-        total_scans = sum(report.last_analysis_stats.values())
-        malicious = report.last_analysis_stats.get("malicious", 0)
+        # check if report is empty
+        if report == {}:
+            total_scans = 0
+            malicious = 0
+        else:
+            total_scans = sum(report.last_analysis_stats.values())
+            malicious = report.last_analysis_stats.get("malicious", 0)
 
         self.populate_scores(value_object, total_scans, malicious)
         self.populate_link(value_object, value, value_type)
@@ -149,8 +153,24 @@ class VTReporter:
             self.populate_url_data(value_object, value, report)
         elif value_type in ["SHA-256", "SHA-1", "MD5"]:
             self.populate_hash_data(value_object, value, report)
-            if report.popular_threat_classification:
-                self.populate_threat_classification(value_object, report)
+            try:
+                if report.popular_threat_classification:
+                    popular_threat_classification = report.get("popular_threat_classification", {})
+
+                    suggested_threat_label = popular_threat_classification.get("suggested_threat_label", NOT_FOUND_ERROR)
+                    popular_threat_category = popular_threat_classification.get('popular_threat_category', [])
+
+                    # Concaténer les valeurs en une seule chaîne de caractères
+                    categories_str = ", ".join(category['value'] for category in popular_threat_category)
+                    if report.popular_threat_classification:
+                        value_object["threat_category"] = categories_str
+                        value_object["threat_labels"] = suggested_threat_label
+                else:
+                    value_object["threat_category"] = NOT_FOUND_ERROR
+                    value_object["threat_labels"] = NOT_FOUND_ERROR
+            except:
+                value_object["threat_category"] = NOT_FOUND_ERROR
+                value_object["threat_labels"] = NOT_FOUND_ERROR
 
     def insert_into_db(self, value_type, value_object):
         """
@@ -193,13 +213,13 @@ class VTReporter:
         """Populates the IP-specific fields."""
         value_object.update({
             "ip": value,
-            "owner": getattr(report, "as_owner", "No owner found"),
+            "owner": getattr(report, "as_owner", NOT_FOUND_ERROR),
             "location": f"{report.continent} / {report.country}" if hasattr(report, "continent") and hasattr(report, "country") else NOT_FOUND_ERROR,
-            "network": getattr(report, "network", "No network found"),
-            "https_certificate": getattr(report, "last_https_certificate", NO_HTTP_CERT),
+            "network": getattr(report, "network", NOT_FOUND_ERROR),
+            "https_certificate": getattr(report, "last_https_certificate", NOT_FOUND_ERROR),
             "info-ip": {
-                "regional_internet_registry": getattr(report, "regional_internet_registry", "No regional internet registry found"),
-                "asn": getattr(report, "asn", "No asn found"),
+                "regional_internet_registry": getattr(report, "regional_internet_registry", NOT_FOUND_ERROR),
+                "asn": getattr(report, "asn", NOT_FOUND_ERROR),
             },
         })
 
@@ -207,15 +227,15 @@ class VTReporter:
         """Populates the domain-specific fields."""
         value_object.update({
             "domain": value,
-            "creation_date": getattr(report, "creation_date", "No creation date found"),
-            "reputation": getattr(report, "reputation", "No reputation found"),
-            "whois": getattr(report, "whois", "No whois found"),
+            "creation_date": getattr(report, "creation_date", NOT_FOUND_ERROR),
+            "reputation": getattr(report, "reputation", NOT_FOUND_ERROR),
+            "whois": getattr(report, "whois", NOT_FOUND_ERROR),
             "info": {
-                "last_analysis_results": getattr(report, "last_analysis_results", "No analysis results found"),
-                "last_analysis_stats": getattr(report, "last_analysis_stats", "No analysis stats found"),
-                "last_dns_records": getattr(report, "last_dns_records", "No dns records found"),
-                "last_https_certificate": NO_HTTP_CERT,
-                "registrar": getattr(report, "registrar", "No registrar found"),
+                "last_analysis_results": getattr(report, "last_analysis_results", NOT_FOUND_ERROR),
+                "last_analysis_stats": getattr(report, "last_analysis_stats", NOT_FOUND_ERROR),
+                "last_dns_records": getattr(report, "last_dns_records", NOT_FOUND_ERROR),
+                "last_https_certificate": getattr(report, "last_https_certificate", NOT_FOUND_ERROR),
+                "registrar": getattr(report, "registrar", NOT_FOUND_ERROR),
             },
         })
 
@@ -223,15 +243,15 @@ class VTReporter:
         """Populates the URL-specific fields."""
         value_object.update({
             "url": value,
-            "title": getattr(report, "title", "No Title Found"),
-            "final_Url": getattr(report, "last_final_url", "No endpoints"),
-            "first_scan": str(utc2local(getattr(report, "first_submission_date", "No date Found"))),
+            "title": getattr(report, "title", NOT_FOUND_ERROR),
+            "final_url": getattr(report, "last_final_url", NOT_FOUND_ERROR),
+            "first_scan": str(utc2local(getattr(report, "first_submission_date", NOT_FOUND_ERROR))),
             "info": {
-                "metadatas": getattr(report, "html_meta", "No metadata Found"),
-                "targeted": getattr(report, "targeted_brand", "No target brand Found"),
-                "links": getattr(report, "outgoing_links", "No links in url"),
-                "redirection_chain": getattr(report, "redirection_chain", "No redirection chain Found"),
-                "trackers": getattr(report, "trackers", "No tracker Found"),
+                "metadatas": getattr(report, "html_meta", NOT_FOUND_ERROR),
+                "targeted": getattr(report, "targeted_brand", NOT_FOUND_ERROR),
+                "links": getattr(report, "outgoing_links", NOT_FOUND_ERROR),
+                "redirection_chain": getattr(report, "redirection_chain", NOT_FOUND_ERROR),
+                "trackers": getattr(report, "trackers", NOT_FOUND_ERROR),
             },
         })
 
@@ -239,17 +259,17 @@ class VTReporter:
         """Populates the hash-specific fields."""
         value_object.update({
             "hash": value,
-            "extension": getattr(report, "type_extension", "No extension found"),
-            "size": getattr(report, "size", "No size found"),
-            "md5": getattr(report, "md5", "No md5 found"),
-            "sha1": getattr(report, "sha1", "No sha1 found"),
-            "sha256": getattr(report, "sha256", "No sha256 found"),
-            "ssdeep": getattr(report, "ssdeep", "No ssdeep found"),
-            "tlsh": getattr(report, "tlsh", "No tlsh found"),
-            "meaningful_name": getattr(report, "meaningful_name", "No meaningful name found"),
-            "names": ", ".join(getattr(report, "names", "No names found")),
-            "type": report.trid[0]["file_type"] if hasattr(report, "trid") else "No filetype Found",
-            "type_probability": report.trid[0]["probability"] if hasattr(report, "trid") else "No type probability",
+            "extension": getattr(report, "type_extension", NOT_FOUND_ERROR),
+            "size": getattr(report, "size", NOT_FOUND_ERROR),
+            "md5": getattr(report, "md5", NOT_FOUND_ERROR),
+            "sha1": getattr(report, "sha1", NOT_FOUND_ERROR),
+            "sha256": getattr(report, "sha256", NOT_FOUND_ERROR),
+            "ssdeep": getattr(report, "ssdeep", NOT_FOUND_ERROR),
+            "tlsh": getattr(report, "tlsh", NOT_FOUND_ERROR),
+            "meaningful_name": getattr(report, "meaningful_name", NOT_FOUND_ERROR),
+            "names": ", ".join(getattr(report, "names", [NOT_FOUND_ERROR])),
+            "type": report.trid[0]["file_type"] if hasattr(report, "trid") else NOT_FOUND_ERROR,
+            "type_probability": report.trid[0]["probability"] if hasattr(report, "trid") else NOT_FOUND_ERROR,
         })
 
     def populate_threat_classification(self, value_object, report):
@@ -311,6 +331,46 @@ class VTReporter:
         # Return the CSV in a list format
         return [csv_object]
 
+
+    def csv_emtpy_report(self, value_type, value):
+        """
+        Create an empty CSV report for a value.
+
+        Parameters:
+        value_type (str): The type of value.
+        value (str): The value to create a report for.
+
+        Returns:
+        List[Dict[str, str]]: The empty CSV report for the value.
+        """
+        # Create the object to use for the CSV
+        csv_object = self.create_empty_object(value_type, value)
+
+        # Return the CSV in a list format
+        return [csv_object]
+
+
+    def create_empty_object(self, value_type, value):
+        """
+        Create an empty object for a given value type.
+
+        Parameters:
+        value_type (str): The type of value.
+        value (str): The value to create the object for.
+
+        Returns:
+        dict: The empty object for the value.
+        """
+        # Initialize the object with default values
+        empty_object = self.initialize_value_object(value_type)
+
+        self.populate_value_object(empty_object, value_type, value, {})
+
+        self.insert_into_db(value_type, empty_object)
+
+        return empty_object
+
+
     def get_report(self, value_type, value):
         """
         Get the report for a value, generating the CSV and rows.
@@ -326,6 +386,13 @@ class VTReporter:
         report = self.create_report(value_type, value)
 
         if report:
+            if report == NOT_FOUND_ERROR:
+                return {
+                    "report": {},
+                    "csv_report": self.csv_emtpy_report(value_type, value),
+                    "rows": []
+                }
+
             # Generate CSV and rows
             csv_report = self.csv_report(value_type, value, report)
             rows = self.get_rows(value_type, value, report)

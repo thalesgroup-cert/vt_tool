@@ -38,7 +38,7 @@ def utc2local(utc: Union[datetime, str]) -> datetime:
     if not isinstance(utc, datetime):
         raise ValueError("Invalid input: utc must be a datetime object or ISO 8601 string.")
 
-    return utc.replace(tzinfo=timezone.utc).astimezone(pytz_timezone("localtime"))
+    return utc.replace(tzinfo=timezone.utc).astimezone()
 
 
 def get_api_key(api_key: Optional[str] = None, api_key_file: Optional[str] = None, env_var: str = "VTAPIKEY") -> str:
