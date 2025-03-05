@@ -1,34 +1,59 @@
 import argparse
+import sys
 import logging
 from datetime import datetime
+from typing import Dict, List, Tuple
 
 import requests
+from requests.exceptions import RequestException
+
 from dotenv import load_dotenv
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
+from rich.prompt import Prompt
+from rich.table import Table
 
 from app.DataHandler.utils import get_api_key, get_proxy, get_user_choice
 from app.FileHandler.create_table import CustomPrettyTable as cpt
 from app.FileHandler.read_file import ValueReader
-from app.MISP.vt_tools2misp import misp_choice
+from app.MISP.vt_tools2misp import misp_choice, misp_choice_template
 from init import Initializator
 
 console = Console()
 
+#TODO Add more templates
+
+TEMPLATE_OPTIONS = {
+    "1": "value,comment",
+    "2": "value,comment,source",
+    "3": "value,category,type,comment,to_ids,tag1,tag2",
+}
 
 def setup_logging() -> None:
     """Setup logging configuration."""
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-    )
+    try:
+        logging.basicConfig(
+            level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+        )
+    except Exception as e:
+        console.print(f"[bold red]Error setting up logging: {e}[/bold red]")
 
 
 def print_welcome_message() -> None:
     """Print the welcome message with ASCII art and title."""
+    print_ascii_art()
+    print_title()
+    print_subtitle()
+    print_welcome_panel()
+
+
+def print_ascii_art() -> None:
+    """Prints ASCII art with rich styling."""
     ascii_art = Text(
-        """
+        r"""
        ^77777!~:.                 :~7?JJJJ?!.     
        :!JYJJJJJ?!:            .~?JJJJJYJ?!^.     
          .!JYJJJJYJ!.         .!!7?JJJJ~:         
@@ -40,9 +65,11 @@ def print_welcome_message() -> None:
   .:?YYJJJJ?~^JJJJJJJJY?~.^JYJJJJJJJ?JJ?J!~~JJ7^  
    .^!?JJJYYYJJJJJJJJJ7:7J!:~?YJJJYJ7::^~~~~:.    
        .:^^^^:^7JJJJJJ: 7YYJ!:^?JJ!:              
+
                 :7JYJ~ :!~~~!J!:^.                
                 .^:!J!!^:~~~!?JJ7:                
               :7JJ?^:!J^:~JYY~.~?Y7^              
+
             :7JYJJJY?~:~?JJJJ~ ..:7J?^            
      .::^^^7JJJJJJJJJY?:.~JJ^.~??^!JJJ?^          
   .~?JYYYJJYJJJJJJJJJ7^   .^7~.^JJYJJJJJ?~.       
@@ -57,11 +84,13 @@ JY7.         ~YJY^                 :!JYJJJ^...~JJ^
         justify="center",
         style="cyan",
     )
-
     console.print(ascii_art)
 
+
+def print_title() -> None:
+    """Prints the main title."""
     title = Text(
-        """
+        r"""
   _      __      __                        __          _   __ __    ______            __   
  | | /| / /___  / /____ ___   __ _  ___   / /_ ___    | | / // /_  /_  __/___  ___   / /___
  | |/ |/ // -_)/ // __// _ \ /  ' \/ -_) / __// _ \   | |/ // __/   / /  / _ \/ _ \ / /(_-<
@@ -70,11 +99,13 @@ JY7.         ~YJY^                 :!JYJJJ^...~JJ^
         justify="center",
         style="bold yellow",
     )
-
     console.print(title)
 
+
+def print_subtitle() -> None:
+    """Prints the subtitle."""
     subtitle = Text(
-        """
+        r"""
   _           _____ _  _   _       ___ ___ ___ _____  
  | |__ _  _  |_   _| || | /_\ ___ / __| __| _ \_   _| 
  | '_ \ || |   | | | __ |/ _ \___| (__| _||   / | |   
@@ -84,9 +115,11 @@ JY7.         ~YJY^                 :!JYJJJ^...~JJ^
         justify="center",
         style="bold green",
     )
-
     console.print(subtitle)
 
+
+def print_welcome_panel() -> None:
+    """Prints the welcome message panel."""
     welcome_message = """
 Welcome to the VirusTotal analysis tool by THA-CERT!
 
@@ -108,99 +141,189 @@ Retrieve VirusTotal analysis information for a set of values (IP/Hash/URL/Domain
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--input_file", "-f", type=str, help="Input file containing values to analyze."
+    """Parse command line arguments with enhanced user feedback."""
+
+    parser = argparse.ArgumentParser(
+        description="VirusTotal Analysis Tool by THA-CERT. This tool retrieves analysis information for a set of values (IP/Hash/URL/Domains) from VirusTotal."
     )
+    
+    # Add template file argument
     parser.add_argument(
-        "--case_id",
-        "-c",
-        type=str,
-        help="ID for the case to create (Or MISP event UUID to create or update)",
+        "--template_file", "-t", type=str,
+        help="Template file to use for the analysis. If not provided, the default template will be used."
     )
+
+    # Add input file argument
     parser.add_argument(
-        "--api_key", "-a", type=str, help="VirusTotal API key, default VTAPIKEY env var"
+        "--input_file", "-f", type=str,
+        help="Input file containing values to analyze. Supports IP addresses, hashes, URLs, or domains."
     )
+
+    # Add case ID argument
     parser.add_argument(
-        "--api_key_file", "-af", type=str, help="VirusTotal API key in a file."
+        "--case_id", "-c", type=str,
+        help="ID for the case to create (Or MISP event UUID to create or update)."
     )
-    parser.add_argument("--proxy", "-p", type=str, help="Proxy to use for requests.")
+
+    # Add API key argument
     parser.add_argument(
-        "values",
-        type=str,
-        nargs="*",
-        help="The values to analyze. Can be IP addresses, hashes, URLs, or domains.",
+        "--api_key", "-a", type=str,
+        help="VirusTotal API key. If not provided, the VTAPIKEY environment variable will be used."
     )
-    return parser.parse_args()
+
+    # Add API key file argument
+    parser.add_argument(
+        "--api_key_file", "-af", type=str,
+        help="Path to a file containing your VirusTotal API key."
+    )
+
+    # Add proxy argument
+    parser.add_argument(
+        "--proxy", "-p", type=str,
+        help="Proxy to use for requests. If not provided, no proxy is used."
+    )
+
+    # Add values argument
+    parser.add_argument(
+        "values", type=str, nargs="*",
+        help="The values to analyze. Can be IP addresses, hashes, URLs, or domains."
+    )
+
+    # Parse the arguments
+    args = parser.parse_args()
+
+    # Additional validation and messages
+    if not args.api_key and not args.api_key_file:
+        console.print("[bold red]Warning! No API key provided. Using environment variable if available.[/bold red]")
+
+    if args.api_key and args.api_key_file:
+        console.print("[bold red]Error: You cannot provide both API key and API key file.[/bold red]")
+        parser.print_help()
+        sys.exit(1)
+
+    if not args.values and not args.input_file and not args.template_file:
+        console.print("[bold red]Error: You must provide either a list of values or an input file.[/bold red]")
+        parser.print_help()
+        sys.exit(1)
+
+    return args
 
 
 def get_remaining_quota(api_key: str, proxy: str = None) -> int:
     """Returns the number of hashes that could be queried within this run."""
+
     url = f"https://www.virustotal.com/api/v3/users/{api_key}/overall_quotas"
     headers = {"Accept": "application/json", "x-apikey": api_key}
-    response = requests.get(
-        url, headers=headers, proxies={"http": proxy, "https": proxy}
-    )
 
-    if response.status_code == 200:
-        json_response = response.json()
-        allowed_hourly_queries = json_response["data"]["api_requests_hourly"]["user"][
-            "allowed"
-        ]
-        used_hourly_queries = json_response["data"]["api_requests_hourly"]["user"][
-            "used"
-        ]
-        return allowed_hourly_queries - used_hourly_queries
-    else:
-        logging.error(
-            "Error retrieving VT Quota (HTTP Status code: %d)", response.status_code
-        )
-        return 0
+    # Use a session for reusability and performance
+    with requests.Session() as session:
+        if proxy:
+            session.proxies.update({"http": proxy, "https": proxy})
+
+        try:
+            response = session.get(url, headers=headers)
+            response.raise_for_status()  # Will raise an exception for HTTP error codes
+        except RequestException as e:
+            logging.error(f"Error retrieving VT Quota: {e}")
+            console.print(f"[bold red]Error retrieving VT Quota: {e}[/bold red]")
+            return 0
+
+        # Parse the response if successful
+        if response.status_code == 200:
+            json_response = response.json()
+            allowed_hourly_queries = json_response["data"]["api_requests_hourly"]["user"]["allowed"]
+            used_hourly_queries = json_response["data"]["api_requests_hourly"]["user"]["used"]
+            remaining_quota = allowed_hourly_queries - used_hourly_queries
+            
+            return remaining_quota
+        else:
+            # Log and console print on error response
+            logging.error(f"Failed to retrieve quota data (HTTP Status code: {response.status_code})")
+            console.print(f"[bold red]Failed to retrieve quota data (HTTP Status code: {response.status_code})[/bold red]")
+            return 0
 
 
-def count_iocs(ioc_dict):
-    total_iocs = 0
-    for key, value in ioc_dict.items():
-        total_iocs += len(value)
-    return total_iocs
+def count_iocs(ioc_dict: Dict[str, List]) -> int:
+    """
+    Count the total number of IOCs in the given dictionary.
+
+    Parameters:
+    ioc_dict (dict): A dictionary where keys are IOC categories (e.g., IPs, Domains) and values are lists of IOCs.
+
+    Returns:
+    int: The total number of IOCs.
+    """
+    if not isinstance(ioc_dict, dict):
+        raise TypeError("Expected a dictionary")
+
+    return sum(len(value) for value in ioc_dict.values() if isinstance(value, list))
 
 
-def analyze_values(args: argparse.Namespace, value_types: list[str]) -> None:
-    """Analyze values provided as arguments."""
+def analyze_values(args: argparse.Namespace, value_types: List[str]) -> None:
+    """
+    Analyze the values provided by the user through the command-line arguments.
+
+    Parameters:
+    args (argparse.Namespace): Command-line arguments.
+    value_types (list): List of value types (e.g., "ips", "domains", "urls", "hashes").
+
+    Returns:
+    None
+    """
+    # Load environment variables
     load_dotenv()
+
+    # Initialize necessary parameters
     api_key = get_api_key(args.api_key, args.api_key_file)
     proxy = get_proxy(args.proxy)
     case_id = str(args.case_id or 0).zfill(6)
 
     init = Initializator(api_key, proxy, case_id)
-
     database = "vttools.sqlite"
     quota_saved = 0
     error_values = 0
 
+    # Establish DB connection
     with init.db_handler.create_connection(database) as conn:
-        if conn is not None:
-            init.db_handler.create_schema(conn)
+        if conn is None:
+            logging.error("Database connection failed.")
+            return
 
+        init.db_handler.create_schema(conn)
+
+        # Start the analysis
         start_time = datetime.now()
         console.print("\n[bold blue]Checking for remaining queries...[/bold blue]")
-        remaining_queries = get_remaining_quota(init.api_key, init.proxy)
 
+        remaining_queries = get_remaining_quota(init.api_key, init.proxy)
         if remaining_queries == 0:
-            console.print(
-                "[bold yellow]No queries remaining for this hour.[/bold yellow]"
-            )
+            console.print("[bold yellow]No queries remaining for this hour.[/bold yellow]")
             console.print("[bold blue]Check your API key before analysis.[/bold blue]")
-            console.print("[bold green]Thank you for using VT Tools! 👍[/bold green]")
             return
 
         console.print(f"Remaining queries for this hour: {remaining_queries}")
-        values = ValueReader(args.input_file, args.values).read_values()
 
+        # Retrieve values to analyze
+        if args.template_file:
+            table = Table(title="Template Types", title_style="bold yellow")
+            table.add_column("Key", justify="center", style="cyan", no_wrap=True)
+            table.add_column("Type", justify="center", style="magenta")
+
+            for key, value in TEMPLATE_OPTIONS.items():
+                table.add_row(key, value)
+
+            console.print(table)
+
+            choice = Prompt.ask(
+                "[bold green]Select an option[/bold green]",
+                choices=TEMPLATE_OPTIONS.keys(),
+                default="1"
+            )
+            values = ValueReader(args.template_file, args.values).read_template_values(TEMPLATE_OPTIONS[choice])
+        else:
+            values = ValueReader(args.input_file, args.values).read_values()
         if not values:
             console.print("[bold yellow]No values to analyze.[/bold yellow]")
-            console.print("Thank you for using VT Tools! [bold green]👍[/bold green]")
             return
 
         console.print(
@@ -214,15 +337,11 @@ def analyze_values(args: argparse.Namespace, value_types: list[str]) -> None:
             console.print(
                 "[bold yellow]Some values may be skipped to avoid exceeding the quota.[/bold yellow]\n"
             )
-            console.print("Thank you for using VT Tools! [bold green]👍[/bold green]")
-            return
 
+        # Start the analysis process for each value type
         for value_type in value_types:
             if not values.get(value_type):
-                console.print(
-                    f"[bold yellow]No {value_type[:-1].upper()} values to analyze.[/bold yellow]"
-                )
-                console.print("\n")
+                console.print(f"[bold yellow]No {value_type[:-1].upper()} values to analyze.[/bold yellow]")
                 continue
 
             console.print(
@@ -232,72 +351,84 @@ def analyze_values(args: argparse.Namespace, value_types: list[str]) -> None:
                     border_style="green",
                 )
             )
+
             results, skipped_values, error_values = analyze_value_type(
-                init, value_type, values[value_type], conn
+                init, value_type, values[value_type], remaining_queries, conn
             )
             quota_saved += skipped_values
 
             if results:
                 process_results(init, results, value_type)
 
+        # Post-analysis report
         csv_files_created = list(set(init.output.csvfilescreated))
         quota_final = get_remaining_quota(init.api_key, init.proxy)
+
         if quota_saved == 0:
-            console.print(
-                "[bold green]Analysis completed. No values were skipped.[/bold green]"
-            )
-        elif quota_saved == 1:
-            console.print(
-                "[bold green]Analysis completed. 1 value was skipped as it already exists in the database.[/bold green]"
-            )
+            console.print("[bold green]Analysis completed. No values were skipped.[/bold green]")
         else:
-            console.print(
-                f"[bold green]Analysis completed. {quota_saved} values were skipped as they already exist in the database.[/bold green]"
-            )
+            console.print(f"[bold green]Analysis completed. {quota_saved} values were skipped as they already exist in the database.[/bold green]")
+
         console.print(f"[bold blue]Errors occurred for {error_values} values.[/bold blue]")
         console.print(f"[bold yellow]Remaining queries for this hour: {quota_final}[/bold yellow]")
+
         total_time = datetime.now() - start_time
         console.print(f"[bold blue]Total time taken: {total_time}[/bold blue]")
 
-        misp_choice(case_str=case_id, csvfilescreated=csv_files_created)
-        console.print("[bold green]Thank you for using VT Tools!👍[/bold green]")
+        # MISP-related action
+        if args.template_file:
+            misp_choice_template(case_str=case_id, csvfilescreated=csv_files_created, template_file=args.template_file, template=TEMPLATE_OPTIONS[choice])
+        else:
+            misp_choice(case_str=case_id, csvfilescreated=csv_files_created)
+
+        console.print("[bold green]Thank you for using VT Tools! 👍[/bold green]")
+
+        # Close resources
         close_resources(init)
 
 
-def analyze_value_type(
-    init: Initializator, value_type: str, values: list[str], conn
-):
-    """Analyze values of a specific type."""
+def analyze_value_type(init: Initializator, value_type: str, values: List[str], remaining_queries, conn) -> tuple:
+    """Analyze values of a specific type (e.g., hashes, URLs, domains)."""
     results = []
     skipped_values = 0
     error_values = 0
 
     for value in values:
-        if value_exists(init, value, value_type, conn):
-            console.print(
-                f"[bold yellow]Value already exists in LOCAL database: {value}[/bold yellow]"
-            )
-            results.append(get_existing_report(init, value, value_type, conn))
-            skipped_values += 1
+        if remaining_queries == 0:
+            console.print("[bold yellow]No queries remaining for this hour.[/bold yellow]")
+            break
         else:
-            result = analyze_value(init, value_type, value)
-            if result:
-                results.append(result)
-            else:
+            try:
+                result, skipped, errors = analyze_single_value(init, value_type, value, conn)
+                results.extend(result)
+                skipped_values += skipped
+                error_values += errors
+
+            except Exception as e:
+                logging.error(f"Error analyzing value {value}: {e}")
                 error_values += 1
 
     return results, skipped_values, error_values
 
 
+def analyze_single_value(init: Initializator, value_type: str, value: str, conn) -> tuple:
+    """Analyze a single value (check if exists, retrieve or analyze)."""
+    if value_exists(init, value, value_type, conn):
+        console.print(f"[bold yellow]Value already exists in LOCAL database: {value}[/bold yellow]")
+        report = get_existing_report(init, value, value_type, conn)
+        return [report], 1, 0
+    else:
+        result = analyze_value(init, value_type, value)
+        if result:
+            return [result], 0, 0
+        else:
+            return [], 0, 1
+
+
 def get_existing_report(init: Initializator, value: str, value_type: str, conn) -> dict:
     """Retrieve existing report for a value from the local database."""
     try:
-        if value_type == "hashes":
-            value_type_str = init.validator.validate_hash(value)
-        else:
-            validator_func = getattr(init.validator, f"validate_{value_type[:-1]}")
-            value_type_str = validator_func(value)
-
+        value_type_str = validate_value(init, value, value_type)
         if value_type_str and value_type_str not in [
             "Private IPv4",
             "Loopback IPv4",
@@ -311,31 +442,19 @@ def get_existing_report(init: Initializator, value: str, value_type: str, conn) 
         ]:
             return init.db_handler.get_report(value, value_type_str.upper(), conn)
     except Exception as e:
-        console.print(
-            f"[bold red]Error retrieving existing report for {value_type[:-1]}: {value}[/bold red]"
-        )
+        console.print(f"[bold red]Error retrieving existing report for {value_type[:-1]}: {value}[/bold red] - {e}")
+    return {}
 
 
 def value_exists(init: Initializator, value: str, value_type: str, conn) -> bool:
     """Check if a value exists in the local database."""
-    check_funcs = {
-        "hashes": init.db_handler.hash_exists,
-        "urls": init.db_handler.url_exists,
-        "domains": init.db_handler.domain_exists,
-        "ips": init.db_handler.ip_exists,
-    }
-    return check_funcs.get(value_type, lambda *args: False)(value, conn)
+    return init.db_handler.exists(conn, value_type, value, value_type[:-2] if value_type == "hashes" else value_type[:-1])
 
 
 def analyze_value(init: Initializator, value_type: str, value: str) -> dict:
     """Analyze a single value using VirusTotal API."""
     try:
-        if value_type == "hashes":
-            value_type_str = init.validator.validate_hash(value)
-        else:
-            validator_func = getattr(init.validator, f"validate_{value_type[:-1]}")
-            value_type_str = validator_func(value)
-
+        value_type_str = validate_value(init, value, value_type)
         if value_type_str and value_type_str not in [
             "Private IPv4",
             "Loopback IPv4",
@@ -351,35 +470,85 @@ def analyze_value(init: Initializator, value_type: str, value: str) -> dict:
         else:
             console.print(f"[bold red]Invalid {value_type[:-1]}: {value}[/bold red]")
     except Exception as e:
-        console.print(
-            f"[bold red]Error analyzing {value_type[:-1]}: {value}[/bold red]"
-        )
-
+        console.print(f"[bold red]Error analyzing {value_type[:-1]}: {value}[/bold red] - {e}")
     return None
 
 
-def process_results(init: Initializator, results: list[dict], value_type: str) -> None:
-    """Process the analysis results."""
-    header_rows = []
-    value_rows = []
+def validate_value(init: Initializator, value: str, value_type: str) -> str:
+    """Validate value based on its type."""
+    try:
+        if value_type == "hashes":
+            return init.validator.validate_hash(value)
+        else:
+            validator_func = getattr(init.validator, f"validate_{value_type[:-1]}")
+            return validator_func(value)
+    except AttributeError:
+        console.print(f"[bold red]No validator found for value type: {value_type}[/bold red]")
+    return ""
+
+def process_results(init: Initializator, results: List[Dict], value_type: str) -> None:
+    """Process and format the analysis results for output to CSV and TXT files."""
+    try:
+        # Extract headers and rows directly from JSON
+        headers, rows = extract_table_data(results)
+        # Create formatted table
+        table = cpt(headers, rows)
+        strtable = table.create_table(value_type[:-1] if value_type != "hashes" else "hash")
+
+        # Generate CSV report for the analysis
+        output_csv(init, results, value_type)
+
+        # Generate TXT report from the formatted table
+        output_txt(init, strtable, value_type)
+
+        # Notify user of successful analysis
+        display_analysis_success_message(value_type)
+
+    except Exception as e:
+        logging.error(f"Error processing results: {e}")
+        console.print(f"[bold red]Error processing results: {e}[/bold red]")
+
+
+def extract_table_data(results: List[Dict]) -> Tuple[List[str], List[List[str]]]:
+    """Extract headers and row values directly from JSON objects."""
+
+    headers = set()
+    rows = []
 
     for result in results:
-        if result:
-            for row in result["rows"]:
-                if row[0] not in header_rows:
-                    header_rows.append(row[0])
-                value_rows.append(row[1:])
+        if not isinstance(result, dict):
+            continue
+        headers.update(result["csv_report"][0].keys())
+        rows.append([str(result["csv_report"][0].get(header, "")) for header in headers])
 
-    table = cpt(header_rows, value_rows)
-    strtable = table.create_table()
+    return list(headers), rows
 
-    total_csv_report = [result["csv_report"] for result in results]
-    init.output.output_to_csv(
-        total_csv_report, "HASH" if value_type == "hashes" else value_type[:-1].upper()
-    )
-    init.output.output_to_txt(
-        strtable, "HASH" if value_type == "hashes" else value_type[:-1].upper()
-    )
+
+def output_csv(init: Initializator, results: List[Dict], value_type: str) -> None:
+    """Generate and save the CSV report based on the analysis results."""
+    try:
+        # Collect all CSV reports from the results
+        total_csv_report = [result["csv_report"] for result in results]
+
+        # Save CSV report
+        init.output.output_to_csv(total_csv_report, f"{value_type[:-1].upper()}" if value_type != "hashes" else "HASH")
+    except Exception as e:
+        logging.error(f"Error saving CSV report: {e}")
+        console.print(f"[bold red]Error saving CSV report: {e}[/bold red]")
+
+
+def output_txt(init: Initializator, strtable: str, value_type: str) -> None:
+    """Generate and save the TXT report based on the formatted table."""
+    try:
+        init.output.output_to_txt(strtable, f"{value_type[:-1].upper()}" if value_type != "hashes" else "HASH")
+    except Exception as e:
+        logging.error(f"Error saving TXT report: {e}")
+        console.print(f"[bold red]Error saving TXT report: {e}[/bold red]")
+
+
+
+def display_analysis_success_message(value_type: str) -> None:
+    """Display a message to notify the user that the analysis has completed successfully."""
     console.print(
         Panel(
             Markdown("### Analysis ended successfully"),
@@ -390,17 +559,26 @@ def process_results(init: Initializator, results: list[dict], value_type: str) -
 
 
 def close_resources(init: Initializator) -> None:
-    """Close resources."""
-    init.client.close()
+    """Close resources like network connections or database clients."""
+    try:
+        init.client.close()
+    except Exception as e:
+        logging.error(f"Error closing resources: {e}")
+        console.print(f"[bold red]Error closing resources: {e}[/bold red]")
 
 
 def main() -> None:
     """Main function to run the script."""
     setup_logging()
     print_welcome_message()
-    args = parse_arguments()
-    value_type = get_user_choice()
-    analyze_values(args, value_type)
+
+    try:
+        args = parse_arguments()
+        value_type = get_user_choice()
+        analyze_values(args, value_type)
+    except Exception as e:
+        logging.error(f"Error during main execution: {e}")
+        console.print(f"[bold red]Error during execution: {e}[/bold red]")
 
 
 if __name__ == "__main__":
