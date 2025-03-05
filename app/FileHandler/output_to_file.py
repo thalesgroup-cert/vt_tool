@@ -1,4 +1,5 @@
 import csv
+import os
 from datetime import datetime
 from typing import Dict, List
 from rich.console import Console
@@ -51,7 +52,7 @@ class OutputHandler:
 
         if file_name_suffix is None:
             raise ValueError(f"Invalid value type: {value_type}")
-
+        os.makedirs("Results", exist_ok=True)
         file_path = f"Results/{case_str}_{file_name_suffix}_{today}.{extension}"
         self.csvfilescreated.append(file_path)
 
