@@ -144,7 +144,7 @@ def parse_arguments() -> argparse.Namespace:
     """Parse command line arguments with enhanced user feedback."""
 
     parser = argparse.ArgumentParser(
-        description="VirusTotal Analysis Tool by THA-CERT. This tool retrieves analysis information for a set of values (IP/Hash/URL/Domains) from VirusTotal."
+        description="VT Tools by THA-CERT. This tool retrieves analysis information for a set of values (IP/Hash/URL/Domains) from VirusTotal."
     )
     
     # Add template file argument
