@@ -2,7 +2,7 @@
     <img src="assets/VTTools Logo.webp" alt="VirusTotal Tool Logo" width="250" height="250">
 </p>
 
-# THA-CERT VT Tools (VirusTotal Analysis Tools) Documentation
+# THA-CERT VT Tools Documentation
 
 Welcome to VT Tools by THA-CERT!
 
