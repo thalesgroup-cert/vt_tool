@@ -2,9 +2,9 @@
     <img src="assets/VTTools Logo.webp" alt="VirusTotal Tool Logo" width="250" height="250">
 </p>
 
-# THA-CERT VirusTotal Analysis Tool Documentation
+# THA-CERT VT Tools (VirusTotal Analysis Tools) Documentation
 
-Welcome to the VirusTotal Analysis Tool by THA-CERT!
+Welcome to VT Tools by THA-CERT!
 
 This tool retrieves analysis information for a set of values (IP addresses, hashes, URLs, domains) from VirusTotal. It simplifies and speeds up the analysis of files, such as log files, by automatically querying VirusTotal for any relevant data.
 
@@ -34,7 +34,7 @@ Ensure you have Python 3.9 or later installed on your system.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/TheoBhang/Analysis_Tool
+   git clone https://github.com/thalesgroup-cert/vt_tool.git
    ```
 
 2. Install the required dependencies:
@@ -53,7 +53,7 @@ The tool can be used in several ways, depending on your needs:
 #### Basic Usage
 
 ```bash
-usage: vt3_tools.py [-h] [--input_file INPUT_FILE] [--case_id CASE_ID] [--api_key API_KEY]
+usage: vt_tools.py [-h] [--input_file INPUT_FILE] [--case_id CASE_ID] [--api_key API_KEY]
                     [--api_key_file API_KEY_FILE] [--proxy PROXY]
                     [values ...]
 ```
@@ -73,30 +73,30 @@ usage: vt3_tools.py [-h] [--input_file INPUT_FILE] [--case_id CASE_ID] [--api_ke
 
 1. **Display help:**
    ```bash
-   python3 vt3_tools.py -h
+   python3 vt_tools.py -h
    ```
 
 2. **Basic Analysis:**
    ```bash
-   python3 vt3_tools.py --case_id <Case ID> [INPUT_VALUE]
+   python3 vt_tools.py --case_id <Case ID> [INPUT_VALUE]
    ```
 
 3. **Input-based Analysis with API Key:**
    ```bash
-   python3 vt3_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> [INPUT_VALUE]
+   python3 vt_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> [INPUT_VALUE]
    ```
 
 4. **File-based Analysis:**
    ```bash
-   python3 vt3_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> --input_file <Path to file>
+   python3 vt_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> --input_file <Path to file>
    ```
 
 5. **Using API Key from a File:**
    ```bash
-   python3 vt3_tools.py --api_key_file <Path to APIKEY file> --case_id <Case ID> --input_file <Path to file>
+   python3 vt_tools.py --api_key_file <Path to APIKEY file> --case_id <Case ID> --input_file <Path to file>
    ```
 
 6. **Using a Proxy:**
    ```bash
-   python3 vt3_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> --input_file <Path to file> --proxy <Proxy URL>
+   python3 vt_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> --input_file <Path to file> --proxy <Proxy URL>
    ```
