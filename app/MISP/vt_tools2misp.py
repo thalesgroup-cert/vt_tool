@@ -378,7 +378,8 @@ def process_and_submit_to_misp(misp, case_str, csv_files_created, template_file,
             console.print(f"[bold green]Detected format: {object_type}[/bold green]")
 
             # Map attributes based on object type
-            attribute_mapping = attribute_type_mapping[object_type] + attribute_type_mapping["general"]
+            attribute_mapping = attribute_type_mapping[object_type].copy()
+            attribute_mapping.update(attribute_type_mapping["general"])
 
             # Create MISP objects from the CSV data
             misp_objects = create_misp_objects_from_csv(data, object_type, attribute_mapping, template_file, template)

@@ -241,11 +241,21 @@ class VTReporter:
 
     def populate_url_data(self, value_object, value, report):
         """Populates the URL-specific fields."""
+        first_submission_date = getattr(report, "first_submission_date", None)
+        if first_submission_date:
+            try:
+                first_scan = str(utc2local(first_submission_date))
+            except Exception as e:
+                logger.error(f"Date was not found: {e}")
+                first_scan = NOT_FOUND_ERROR
+        else:
+            first_scan = NOT_FOUND_ERROR
+
         value_object.update({
             "url": value,
             "title": getattr(report, "title", NOT_FOUND_ERROR),
             "final_url": getattr(report, "last_final_url", NOT_FOUND_ERROR),
-            "first_scan": str(utc2local(getattr(report, "first_submission_date", NOT_FOUND_ERROR))),
+            "first_scan": first_scan,
             "info": {
                 "metadatas": getattr(report, "html_meta", NOT_FOUND_ERROR),
                 "targeted": getattr(report, "targeted_brand", NOT_FOUND_ERROR),
