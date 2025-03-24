@@ -227,7 +227,8 @@ def create_misp_objects_from_csv(
     data: List[Dict[str, str]],
     object_name: str,
     attribute_mapping: Dict[str, List[str]],
-    template_file: Optional[str] = None
+    template_file: Optional[str] = None,
+    template: Optional[str] = None
 ) -> List[MISPObject]:
     """
     Create MISP objects from CSV data and attribute mapping.
