@@ -4,6 +4,7 @@ import re
 import validators
 import tldextract
 from hashid import HashID
+import hashlib
 from pydantic import BaseModel, field_validator, Field
 
 
@@ -68,22 +69,24 @@ class DataValidator:
 
     ### === HASH VALIDATION === ###
 
-    def validate_hash(self, h: str) -> str | None:
+    def validate_hash(self, hash_str: str) -> str | None:
         """
         Validates a hash and identifies its type.
 
         :param h: The hash value.
         :return: The hash type (e.g., 'MD5', 'SHA-256', 'SSDEEP') or None if invalid.
         """
-        h = h.strip().lower()  # Normalize input
-        hash_info = self.hashid.identifyHash(h)
-        try:
-            return next(hash_info).name  # Get the first element from the generator
-        except StopIteration:
-            pass  # No match found, continue
-
-        if self.ssdeep_regex.match(h) and h != self.empty_ssdeep:
-            return "SSDEEP"
+        hash_str = hash_str.strip().lower()
+        if len(hash_str) == 32:
+            return 'MD5'
+        elif len(hash_str) == 40:
+            return 'SHA-1'
+        elif len(hash_str) == 64:
+            return 'SHA-256'  # or verify further with actual checks
+        elif self.ssdeep_regex.match(hash_str):
+            return 'SSDEEP'
+        if hash_str == self.empty_ssdeep:
+            return None
         return None
 
 
