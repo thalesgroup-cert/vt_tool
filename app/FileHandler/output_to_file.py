@@ -54,7 +54,8 @@ class OutputHandler:
             raise ValueError(f"Invalid value type: {value_type}")
         os.makedirs("Results", exist_ok=True)
         file_path = f"Results/{case_str}_{file_name_suffix}_{today}.{extension}"
-        self.csvfilescreated.append(file_path)
+        if extension == "csv":
+            self.csvfilescreated.append(file_path)
 
         return file_path
 

@@ -3,6 +3,7 @@ import ipaddress
 import re
 import validators
 import tldextract
+from urllib.parse import urlparse, parse_qs
 from hashid import HashID
 import hashlib
 import socket
@@ -12,8 +13,52 @@ from pydantic import BaseModel, field_validator, Field
 def get_service_name(port, protocol='tcp'):
     try:
         return socket.getservbyport(int(port), protocol)
+    except (socket.error, ValueError):
+        return None
     except OSError:
         return None
+    except Exception as e:
+        return None
+
+def get_port_from_service_name(service_name, protocol='tcp'):
+    try:
+        return socket.getservbyname(service_name, protocol)
+    except (socket.error, ValueError):
+        return None
+    except OSError:
+        return None
+    except Exception as e:
+        return None
+
+def extract_ip_address(text):
+    match = re.search(r'IP Address:\s*([\d\.]+)', text)
+    if match:
+        return match.group(1)
+    return None
+
+def get_url_details(url):
+    """
+    Extracts comprehensive details from a URL including TLD, subdomain, scheme, resource path,
+    query string, port, domain, and fragment.
+
+    :param url: The URL to extract details from.
+    :return: A dictionary containing detailed URL components.
+    """
+    parsed_url = urlparse(url)
+    extracted = tldextract.extract(url)
+
+    return {
+        "scheme": parsed_url.scheme,
+        "subdomain": extracted.subdomain,
+        "domain": extracted.registered_domain,
+        "tld": extracted.suffix,
+        "port": parsed_url.port,
+        "resource_path": parsed_url.path,
+        "query_strings": parsed_url.query,
+        "query_params": parse_qs(parsed_url.query),
+        "fragment": parsed_url.fragment
+    }
+
 
 class DataValidator:
     """

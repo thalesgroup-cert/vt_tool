@@ -13,6 +13,17 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS urls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     url TEXT,
+    domain TEXT,
+    ip TEXT,
+    port TEXT,
+    protocol TEXT,
+    fragment TEXT,
+    resource_path TEXT,
+    query_params TEXT,
+    query_strings TEXT,
+    tld TEXT,
+    subdomain TEXT,
+    scheme TEXT,
     malicious_score TEXT,
     total_scans TEXT,
     tags TEXT,
@@ -69,6 +80,9 @@ CREATE TABLE IF NOT EXISTS ips (
 CREATE TABLE IF NOT EXISTS domains (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     domain TEXT,
+    ip TEXT,
+    port TEXT,
+    protocol TEXT,
     malicious_score TEXT,
     total_scans TEXT,
     tags TEXT,
@@ -153,14 +167,16 @@ class DBHandler:
 
     def insert_domain_data(self, conn, domain_data):
         """Insert domain data into the domains table"""
-        columns = ["domain", "malicious_score", "total_scans", "tags", "link", "creation_date",
+        columns = ["domain", "ip", "port", "protocol", "malicious_score", "total_scans", "tags", "link", "creation_date",
                    "reputation", "whois", "last_analysis_results", "last_analysis_stats",
                    "last_dns_records", "last_https_certificate", "registrar"]
         self._insert_data(conn, "domains", domain_data, columns)
 
     def insert_url_data(self, conn, url_data):
         """Insert URL data into the urls table"""
-        columns = ["url", "malicious_score", "total_scans", "tags", "link", "title", 
+        columns = ["url", "domain", "ip", "port", "protocol", "fragment", 
+                   "resource_path", "query_params", "query_strings", "tld", "subdomain", "scheme", 
+                   "malicious_score", "total_scans", "tags", "link", "title", 
                    "final_url", "first_scan", "metadatas", "targeted", "links", 
                    "redirection_chain", "trackers"]
         self._insert_data(conn, "urls", url_data, columns)
@@ -293,17 +309,18 @@ class DBHandler:
         """Populate IP-related data"""
         if isinstance(value, tuple):
             value = value[0]
+        print(report)
         value_object.update({
             "ip": value,
-            "port": report[5],
-            "protocol": report[6],
-            "owner": report[7],
-            "location": report[8],
-            "network": report[9],
+            "port": report[2],
+            "protocol": report[3],
+            "owner": report[8],
+            "location": report[9],
+            "network": report[10],
+            "https_certificate": report[11] if report[11] != NO_HTTP_CERT else None,
             "info-ip": {
-                "https_certificate": report[10] if report[10] != NO_HTTP_CERT else None,
-                "regional_internet_registry": report[11],
-                "asn": report[12]
+                "regional_internet_registry": report[12],
+                "asn": report[13]
             }
         })
 
@@ -311,15 +328,18 @@ class DBHandler:
         """Populate domain-related data"""
         value_object.update({
             "domain": value,
-            "creation_date": report[6],
-            "reputation": report[7],
-            "whois": [report[8]],
+            "ip": report[2],
+            "port": report[3],
+            "protocol": report[4],
+            "creation_date": report[5],
+            "reputation": report[6],
+            "whois": [report[7]],
             "info": {
-                "last_analysis_results": report[9],
-                "last_analysis_stats": report[10],
-                "last_dns_records": report[11],
-                "last_https_certificate": report[12],
-                "registrar": report[13]
+                "last_analysis_results": report[8],
+                "last_analysis_stats": report[9],
+                "last_dns_records": report[10],
+                "last_https_certificate": report[11],
+                "registrar": report[12],
             },
         })
 
@@ -327,15 +347,30 @@ class DBHandler:
         """Populate URL-related data"""
         value_object.update({
             "url": value,
-            "title": report[6],
-            "final_url": report[7],
-            "first_scan": report[8],
+            "domain": report[2],
+            "ip": report[3],
+            "port": report[4],
+            "protocol": report[5],
+            "fragment": report[6],
+            "resource_path": report[7],
+            "query_params": report[8],
+            "query_strings": report[9],
+            "tld": report[10],
+            "subdomain": report[11],
+            "scheme": report[12],
+            "malicious_score": report[13],
+            "total_scans": report[14],
+            "tags": report[15],
+            "link": report[16],
+            "title": report[17],
+            "final_url": report[18],
+            "first_scan": report[19],
             "info": {
-                "metadatas": report[9],
-                "targeted": report[10],
-                "links": report[11],
-                "redirection_chain": report[12],
-                "trackers": report[13]
+                "metadatas": report[20],
+                "targeted": report[21],
+                "links": report[22],
+                "redirection_chain": report[23],
+                "trackers": report[24]
             },
         })
 

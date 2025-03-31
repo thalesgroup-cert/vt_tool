@@ -4,7 +4,7 @@ import os
 import re
 import warnings
 from typing import List, Dict, Optional
-
+import datetime
 from pymisp import ExpandedPyMISP, MISPEvent, MISPObject
 from rich.console import Console
 from rich.prompt import Prompt
@@ -207,6 +207,14 @@ def create_misp_object(row: Dict[str, str], object_name: str, attribute_mapping:
                     raise ValueError(f"Attribute mapping for '{key}' is incomplete (should contain 4 details).")
 
                 attribute_type, attr_type, category, to_ids = attr_details
+
+                # Skip known bad values
+                if value in ["Not found", "Not Found", "", None, "null"]:
+                    continue
+                if attr_type == "datetime":
+                    if value == "0":
+                        value = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
                 misp_object.add_attribute(
                     attribute_type,
                     value=value,
@@ -249,7 +257,7 @@ def create_misp_objects_from_csv(
         "file": "hash",
         "url": "url",
         "ip-port": "ip",
-        "domain": "domain"
+        "domain-ip": "domain"
     }
 
     template_key = patterns.get(object_name)
@@ -292,7 +300,7 @@ def identify_object_type(csv_file: str) -> str:
         (r"Hash", "file"),
         (r"URL", "url"),
         (r"IP", "ip-port"),
-        (r"Domain", "domain")
+        (r"Domain", "domain-ip")
     ]
 
     # Search the CSV file name for each pattern
@@ -334,7 +342,11 @@ def process_and_submit_to_misp(misp, case_str, csv_files_created, template_file,
             "size": ("size", "size-in-bytes", "Payload delivery", False),
             "meaningful_name": ("filename", "text", "Payload delivery", False),
         },
-        "domain": {
+        "domain-ip": {
+            "domain": ("domain", "domain", "Network activity", False),
+            "ip": ("ip", "ip-dst", "Network activity", False),
+            "port": ("port", "port", "Network activity", False),
+            "protocol": ("protocol", "text", "Network activity", False),
             "creation_date": ("creation_date", "datetime", "Network activity", False),
             "reputation": ("reputation", "text", "External analysis", False),
             "whois": ("whois", "text", "External analysis", False),
@@ -342,6 +354,17 @@ def process_and_submit_to_misp(misp, case_str, csv_files_created, template_file,
         },
         "url": {
             "url": ("url", "url", "Network activity", False),
+            "domain": ("domain", "domain", "Network activity", False),
+            "ip": ("ip", "ip-dst", "Network activity", False),
+            "port": ("port", "port", "Network activity", False),
+            "protocol": ("protocol", "text", "Network activity", False),
+            "fragment": ("fragment", "text", "Other", False),
+            "resource_path": ("resource_path", "text", "Network activity", False),
+            "query_params": ("query_params", "text", "Other", False),
+            "query_strings": ("query_strings", "text", "Other", False),
+            "tld": ("tld", "text", "Other", False),
+            "subdomain": ("subdomain", "text", "Other", False),
+            "scheme": ("scheme", "text", "Other", False),
             "title": ("title", "text", "Other", False),
             "final_url": ("final_url", "url", "Network activity", False),
             "first_scan": ("first_scan", "datetime", "Other", False),
@@ -349,7 +372,7 @@ def process_and_submit_to_misp(misp, case_str, csv_files_created, template_file,
         },
         "ip-port": {
             "ip": ("ip", "ip-dst", "Network activity", False),
-            "port": ("src-port", "port", "Network activity", False),
+            "port": ("port", "port", "Network activity", False),
             "protocol": ("protocol", "text", "Network activity", False),
             "owner": ("owner", "text", "Other", False),
             "location": ("country-code", "text", "Network activity", False),
@@ -401,11 +424,6 @@ def process_and_submit_to_misp(misp, case_str, csv_files_created, template_file,
 def submit_misp_objects(misp, misp_event, misp_objects) -> None:
     """
     Submit a list of MISP objects to a MISP event.
-
-    Parameters:
-        misp: An instance of the MISP object.
-        misp_event: The MISP event to which objects will be added.
-        misp_objects: List of MISP objects to be submitted.
     """
     if not misp_objects:
         console.print("[bold yellow]No MISP objects to submit.[/bold yellow]")
@@ -413,10 +431,17 @@ def submit_misp_objects(misp, misp_event, misp_objects) -> None:
 
     console.print(f"[bold]Submitting {len(misp_objects)} MISP objects to event {misp_event.id}...[/bold]")
 
-    # Loop through and submit each MISP object
     for misp_object in misp_objects:
+        if not misp_object.attributes:
+            console.print(f"[bold yellow]Warning: MISP object '{misp_object.name}' has no attributes.[/bold yellow]")
+            continue
+
+        console.print(f"Submitting object: {misp_object.name} with {len(misp_object.attributes)} attributes")
+
         try:
-            # Attempt to add the object to the MISP event
+            misp_object.uuid = None
+            for attr in misp_object.attributes:
+                attr.uuid = None
             misp.add_object(misp_event.id, misp_object)
             console.print(f"[bold green]Successfully added MISP object {misp_object.name}[/bold green]")
         except Exception as e:
@@ -424,12 +449,17 @@ def submit_misp_objects(misp, misp_event, misp_objects) -> None:
             logging.error(f"Failed to add MISP object {misp_object.name}: {e}")
 
     try:
-        # Update the event after adding all objects
         misp.update_event(misp_event)
-        console.print(f"[bold green]MISP event {misp_event.id} updated successfully.[/bold green]")
+        updated_event_dict = misp.get_event(misp_event.id)
+        updated_event = MISPEvent()
+        updated_event.load(updated_event_dict)
+
+        console.print(f"[bold green]MISP event {misp_event.id} updated successfully with {len(updated_event.Object)} objects.[/bold green]")
+
     except Exception as e:
         console.print(f"[bold red]Failed to update MISP event: {e}[/bold red]")
         logging.error(f"Failed to update MISP event: {e}")
+
 
 
 def misp_event(case_str, csvfilescreated, template_file, template) -> None:

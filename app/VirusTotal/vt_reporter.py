@@ -2,7 +2,7 @@ import logging
 from vt import url_id  # for interacting with URLs in VirusTotal
 from app.DataHandler.utils import utc2local  # for converting UTC time to local time
 from app.DBHandler.db_handler import DBHandler
-from app.DataHandler.validator import get_service_name
+from app.DataHandler.validator import get_service_name, get_url_details, extract_ip_address, get_port_from_service_name
 # Constants for handling various types and error messages
 IPV4_PUBLIC_TYPE = "PUBLIC IPV4"
 NOT_FOUND_ERROR = "Not found"
@@ -224,14 +224,22 @@ class VTReporter:
             "location": f"{report.continent} / {report.country}" if hasattr(report, "continent") and hasattr(report, "country") else NOT_FOUND_ERROR,
             "network": getattr(report, "network", NOT_FOUND_ERROR),
             "https_certificate": getattr(report, "last_https_certificate", NOT_FOUND_ERROR),
-            "regional_internet_registry": getattr(report, "regional_internet_registry", NOT_FOUND_ERROR),
-            "asn": getattr(report, "asn", NOT_FOUND_ERROR),
+            "info-ip": {
+                "regional_internet_registry": getattr(report, "regional_internet_registry", NOT_FOUND_ERROR),
+                "asn": getattr(report, "asn", NOT_FOUND_ERROR),
+            }
         })
 
     def populate_domain_data(self, value_object, value, report):
         """Populates the domain-specific fields."""
+        ip = getattr(report, "whois", {})
+        if isinstance(ip, str):
+            ip = extract_ip_address(ip)
         value_object.update({
             "domain": value,
+            "ip": ip if ip else NOT_FOUND_ERROR,
+            "port": getattr(report, "port", NOT_FOUND_ERROR),
+            "protocol": get_service_name(getattr(report, "port", None)) if getattr(report, "port", None) else NOT_FOUND_ERROR,
             "creation_date": getattr(report, "creation_date", NOT_FOUND_ERROR),
             "reputation": getattr(report, "reputation", NOT_FOUND_ERROR),
             "whois": getattr(report, "whois", NOT_FOUND_ERROR),
@@ -246,6 +254,7 @@ class VTReporter:
 
     def populate_url_data(self, value_object, value, report):
         """Populates the URL-specific fields."""
+        details = get_url_details(value)
         first_submission_date = getattr(report, "first_submission_date", None)
         if first_submission_date:
             try:
@@ -256,8 +265,26 @@ class VTReporter:
         else:
             first_scan = NOT_FOUND_ERROR
 
+        if not details["port"]:
+            port = get_port_from_service_name(details["scheme"])
+            print(f"Port from service name: {port}")
+        else:
+            port = details["port"]
+            print(f"Port from details: {port}")
+
         value_object.update({
             "url": value,
+            "domain": details["domain"] if details["domain"] !='' else NOT_FOUND_ERROR,
+            "ip": getattr(report, "ip_address", NOT_FOUND_ERROR),
+            "port": port,
+            "protocol": get_service_name(details["port"]) if details["port"] !='' else NOT_FOUND_ERROR,
+            "fragment": details["fragment"] if details["fragment"] !='' else NOT_FOUND_ERROR,
+            "resource_path": details["resource_path"] if details["resource_path"] !='' else NOT_FOUND_ERROR,
+            "query_params": details["query_params"] if details["query_params"] !='' else NOT_FOUND_ERROR,
+            "query_strings": details["query_strings"] if details["query_strings"] !='' else NOT_FOUND_ERROR,
+            "tld": details["tld"] if details["tld"] !='' else NOT_FOUND_ERROR,
+            "subdomain": details["subdomain"] if details["subdomain"] !='' else NOT_FOUND_ERROR,
+            "scheme": details["scheme"] if details["scheme"] !='' else NOT_FOUND_ERROR,
             "title": getattr(report, "title", NOT_FOUND_ERROR),
             "final_url": getattr(report, "last_final_url", NOT_FOUND_ERROR),
             "first_scan": first_scan,
