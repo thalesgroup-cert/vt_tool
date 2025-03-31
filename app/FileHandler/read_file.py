@@ -24,6 +24,20 @@ class Pattern:
         r"(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)|"
         r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))|(?:\s|$)"
     )
+    PATTERN_IP_PORT: RePattern = re.compile(
+        r"(?:^|\s)("                  # Start of group for IP: optional whitespace or line start
+        r"(?:"                         # Start IPv6 group
+        r"(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"
+        r"(?:[0-9a-fA-F]{1,4}:){1,7}:|"
+        r"(?:[0-9a-fA-F]{1,4}:){1,6}:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\."
+        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\."
+        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\."
+        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|"
+        r"(?:\d{1,3}\.){3}\d{1,3}"  # IPv4
+        r")"
+        r"):(\d{1,5})?"             # Optional port, capturing only the digits
+        r"(?:\s|$)"                   # Optional whitespace or end of line
+    )
     PATTERN_URL: RePattern = re.compile(
         r"(?:https?://|www\.)"  # Protocol (http://, https://, or www.)
         r"(?:[\da-z\.-]+)\.[a-z]{2,6}"  # Domain name
@@ -44,7 +58,7 @@ class Pattern:
     def match_pattern(self, text: str, pattern_type: str) -> List[str]:
         """Match patterns based on the pattern type."""
         patterns = {
-            'ip': self.PATTERN_IP,
+            'ip': self.PATTERN_IP_PORT,
             'url': self.PATTERN_URL,
             'hash': self.PATTERN_HASH,
             'domain': self.PATTERN_DOMAIN,

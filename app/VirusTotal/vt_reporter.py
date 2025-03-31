@@ -2,7 +2,7 @@ import logging
 from vt import url_id  # for interacting with URLs in VirusTotal
 from app.DataHandler.utils import utc2local  # for converting UTC time to local time
 from app.DBHandler.db_handler import DBHandler
-
+from app.DataHandler.validator import get_service_name
 # Constants for handling various types and error messages
 IPV4_PUBLIC_TYPE = "PUBLIC IPV4"
 NOT_FOUND_ERROR = "Not found"
@@ -45,6 +45,8 @@ class VTReporter:
         Returns:
             dict: The report data from VirusTotal.
         """
+        if isinstance(value, tuple):
+            value = value[0]
         # Define API endpoints for different value types
         api_endpoints = {
             IPV4_PUBLIC_TYPE: f"/ip_addresses/{value}",
@@ -54,14 +56,11 @@ class VTReporter:
             "SHA-1": f"/files/{value}",
             "MD5": f"/files/{value}",
         }
-
         # Initialize report
         report = None
-
         # Ensure valid value_type and value are provided
         if value_type not in api_endpoints:
             return None
-
         try:
             # Fetch the report from VirusTotal
             report = self.vt.get_object(api_endpoints[value_type])
@@ -73,7 +72,6 @@ class VTReporter:
             else:
                 logger.error(f"Error fetching report for {value_type}: {value} - {e}")
                 raise e
-
         return report if report else None
 
     def create_object(self, value_type, value, report):
@@ -207,20 +205,27 @@ class VTReporter:
         if value_type == "URL":
             value_object["link"] = f"https://www.virustotal.com/gui/url/{url_id(value)}"
         else:
+            if isinstance(value, tuple):
+                value = value[0]
             value_object["link"] = f"https://www.virustotal.com/gui/search/{value}"
 
     def populate_ip_data(self, value_object, value, report):
         """Populates the IP-specific fields."""
+        if isinstance(value, tuple):
+            ip, port = value
+        else:
+            ip = value
+            port = None
         value_object.update({
-            "ip": value,
+            "ip": ip,
+            "port": port if port else NOT_FOUND_ERROR,
+            "protocol": get_service_name(port) if port else NOT_FOUND_ERROR,
             "owner": getattr(report, "as_owner", NOT_FOUND_ERROR),
             "location": f"{report.continent} / {report.country}" if hasattr(report, "continent") and hasattr(report, "country") else NOT_FOUND_ERROR,
             "network": getattr(report, "network", NOT_FOUND_ERROR),
             "https_certificate": getattr(report, "last_https_certificate", NOT_FOUND_ERROR),
-            "info-ip": {
-                "regional_internet_registry": getattr(report, "regional_internet_registry", NOT_FOUND_ERROR),
-                "asn": getattr(report, "asn", NOT_FOUND_ERROR),
-            },
+            "regional_internet_registry": getattr(report, "regional_internet_registry", NOT_FOUND_ERROR),
+            "asn": getattr(report, "asn", NOT_FOUND_ERROR),
         })
 
     def populate_domain_data(self, value_object, value, report):
@@ -394,7 +399,6 @@ class VTReporter:
         """
         # Generate the report using an external method
         report = self.create_report(value_type, value)
-
         if report:
             if report == NOT_FOUND_ERROR:
                 return {

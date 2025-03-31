@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS hashes (
 CREATE TABLE IF NOT EXISTS ips (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ip TEXT,
+    port TEXT,
+    protocol TEXT,
     malicious_score TEXT,
     total_scans TEXT,
     tags TEXT,
@@ -145,7 +147,7 @@ class DBHandler:
 
     def insert_ip_data(self, conn, ip_data):
         """Insert IP data into the ips table"""
-        columns = ["ip", "malicious_score", "total_scans", "tags", "link", "owner", 
+        columns = ["ip", "port", "protocol", "malicious_score", "total_scans", "tags", "link", "owner",
                    "location", "network", "https_certificate", "regional_internet_registry", "asn"]
         self._insert_data(conn, "ips", ip_data, columns)
 
@@ -223,6 +225,8 @@ class DBHandler:
             return None
 
         cursor = conn.cursor()
+        if isinstance(value, tuple):
+            value = value[0]
         report = None
         try:
             if value_type == IPV4_PUBLIC_TYPE:
@@ -277,6 +281,8 @@ class DBHandler:
         if value_type == "URL":
             value_object["link"] = f"https://www.virustotal.com/gui/url/{url_id(value)}"
         else:
+            if isinstance(value, tuple):
+                value = value[0]
             value_object["link"] = f"https://www.virustotal.com/gui/search/{value}"
 
     def populate_tags(self, value_object, tags):
@@ -285,16 +291,20 @@ class DBHandler:
 
     def populate_ip_data(self, value, value_object, report):
         """Populate IP-related data"""
+        if isinstance(value, tuple):
+            value = value[0]
         value_object.update({
             "ip": value,
-            "owner": report[6],
-            "location": report[7],
-            "network": report[8],
-            "https_certificate": report[9],
+            "port": report[5],
+            "protocol": report[6],
+            "owner": report[7],
+            "location": report[8],
+            "network": report[9],
             "info-ip": {
-                "regional_internet_registry": report[10],
-                "asn": report[11]
-            },
+                "https_certificate": report[10] if report[10] != NO_HTTP_CERT else None,
+                "regional_internet_registry": report[11],
+                "asn": report[12]
+            }
         })
 
     def populate_domain_data(self, value,  value_object, report):

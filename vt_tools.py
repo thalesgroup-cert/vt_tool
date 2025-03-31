@@ -448,7 +448,13 @@ def get_existing_report(init: Initializator, value: str, value_type: str, conn) 
 
 def value_exists(init: Initializator, value: str, value_type: str, conn) -> bool:
     """Check if a value exists in the local database."""
-    return init.db_handler.exists(conn, value_type, value, value_type[:-2] if value_type == "hashes" else value_type[:-1])
+    if value_type == "hashes":
+        return init.db_handler.exists(conn, value_type, value, value_type[:-2])
+    else:
+        if value_type == "ips":
+            return init.db_handler.exists(conn, value_type, value[0], value_type[:-1])
+        else:
+            return init.db_handler.exists(conn, value_type, value, value_type[:-1])
 
 
 def analyze_value(init: Initializator, value_type: str, value: str) -> dict:

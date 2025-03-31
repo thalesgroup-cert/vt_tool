@@ -5,8 +5,15 @@ import validators
 import tldextract
 from hashid import HashID
 import hashlib
+import socket
 from pydantic import BaseModel, field_validator, Field
 
+
+def get_service_name(port, protocol='tcp'):
+    try:
+        return socket.getservbyport(int(port), protocol)
+    except OSError:
+        return None
 
 class DataValidator:
     """
@@ -31,7 +38,7 @@ class DataValidator:
         :return: IP type (e.g., 'Public IPv4', 'Private IPv6') or None if invalid.
         """
         try:
-            ip_obj = ipaddress.ip_address(ip)
+            ip_obj = ipaddress.ip_address(ip[0])
             ip_type = "IPv4" if ip_obj.version == 4 else "IPv6"
 
             if ip_obj.is_private:
