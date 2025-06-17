@@ -25,18 +25,23 @@ class Pattern:
         r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?))|(?:\s|$)"
     )
     PATTERN_IP_PORT: RePattern = re.compile(
-        r"(?:^|\s)("                  # Start of group for IP: optional whitespace or line start
-        r"(?:"                         # Start IPv6 group
-        r"(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|"
-        r"(?:[0-9a-fA-F]{1,4}:){1,7}:|"
-        r"(?:[0-9a-fA-F]{1,4}:){1,6}:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\."
-        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\."
-        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\."
-        r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|"
-        r"(?:\d{1,3}\.){3}\d{1,3}"  # IPv4
-        r")"
-        r"):(\d{1,5})?"             # Optional port, capturing only the digits
-        r"(?:\s|$)"                   # Optional whitespace or end of line
+        r"(?:^|\s)("
+            r"(?:"
+                r"(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|"
+                r"(?:[0-9a-fA-F]{1,4}:){1,7}:|"
+                r"(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|"
+                r"(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|"
+                r"(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|"
+                r"(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|"
+                r"(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|"
+                r"[0-9a-fA-F]{1,4}:(?:(?::[0-9a-fA-F]{1,4}){1,6})|"
+                r":(?:(?::[0-9a-fA-F]{1,4}){1,7}|:)|"
+                # IPv4
+                r"(?:\d{1,3}\.){3}\d{1,3}"
+            r")"
+            r")"
+            r"(?::(\d{1,5}))?"  # Optional port
+            r"(?=\s|$)"         # Lookahead for whitespace or end-of-line
     )
     PATTERN_URL: RePattern = re.compile(
         r"(?:https?://|www\.)"  # Protocol (http://, https://, or www.)

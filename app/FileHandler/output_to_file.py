@@ -72,13 +72,16 @@ class OutputHandler:
         """
         file_path = self._get_file_path(value_type, extension="csv")
         try:
-            with open(file_path, mode="w", newline="", encoding="utf-8") as data_file:
+            with open(file_path, mode="w", newline="", encoding="utf-8", errors="replace") as data_file:
                 # Ensure fieldnames are properly extracted from data keys
                 fieldnames = data[0][0].keys()
                 csv_writer = csv.DictWriter(data_file, fieldnames=fieldnames, delimiter=",")
                 csv_writer.writeheader()
                 for obj in data:
-                    csv_writer.writerow(obj[0])
+                    try:
+                        csv_writer.writerow(obj[0])
+                    except Exception as e:
+                        continue
 
         except Exception as e:
             print(f"Error occurred while writing CSV file: {e}")
@@ -98,7 +101,7 @@ class OutputHandler:
         """
         file_path = self._get_file_path(value_type, extension="txt")
         try:
-            with open(file_path, mode="w", encoding="utf-8") as f:
+            with open(file_path, mode="w", encoding="utf-8", errors="replace") as f:
                 # Write each item from the list as a new line in the TXT file
                 f.write(str(data))
 

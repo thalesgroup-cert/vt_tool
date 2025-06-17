@@ -123,6 +123,16 @@ class DBHandler:
             conn.close()
             print("SQLite database connection closed.")
 
+    def safe_str(self, obj):
+        """
+        Safely convert any object to a UTF-8 compatible string,
+        replacing invalid characters if necessary.
+        """
+        try:
+            return str(obj).encode("utf-8", "replace").decode("utf-8")
+        except Exception:
+            return "<encoding error>"
+
     def _insert_data(self, conn, table_name, data, columns):
         """Insert data into the specified table if it doesn't already exist, and handle nested info fields"""
         columns_str = ", ".join(columns)
@@ -138,24 +148,23 @@ class DBHandler:
         for key in ["info", "info-ip"]:
             if key in unnested_data:
                 for sub_key, value in unnested_data[key].items():
-                    unnested_data[sub_key] = str(value)
+                    unnested_data[sub_key] = self.safe_str(value)
                 del unnested_data[key]
 
         try:
             cur = conn.cursor()
-            cur.execute(select_query, (data[columns[0]],))  # Check if the record already exists
+            cur.execute(select_query, (self.safe_str(data[columns[0]]),))  # Check if the record already exists
 
-            values = tuple(str(unnested_data[col]) for col in columns)
+            values = tuple(self.safe_str(unnested_data.get(col, "")) for col in columns)
             if not cur.fetchone():  # If the record doesn't exist, insert it
                 cur.execute(insert_query, values)
             else:
-                cur.execute(update_query, values + (data[columns[0]],))  # Append WHERE column value
+                cur.execute(update_query, values + (self.safe_str(data[columns[0]]),))  # Append WHERE column value
 
             conn.commit()
             cur.close()
         except Exception as e:
             conn.rollback()
-            print(f"Error inserting/updating data into {table_name}: {e}")
             cur.close()
 
 
@@ -309,7 +318,6 @@ class DBHandler:
         """Populate IP-related data"""
         if isinstance(value, tuple):
             value = value[0]
-        print(report)
         value_object.update({
             "ip": value,
             "port": report[2],
