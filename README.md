@@ -2,101 +2,322 @@
     <img src="assets/VTTools Logo.webp" alt="VirusTotal Tool Logo" width="250" height="250">
 </p>
 
-# THA-CERT VT Tools Documentation
+# THA-CERT VT Tool
 
-Welcome to VT Tools by THA-CERT!
+[![License](https://img.shields.io/github/license/thalesgroup-cert/vt_tool)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](#requirements)
+[![Issues](https://img.shields.io/github/issues/thalesgroup-cert/vt_tool)](https://github.com/thalesgroup-cert/vt_tool/issues)
+[![Stars](https://img.shields.io/github/stars/thalesgroup-cert/vt_tool?style=social)](https://github.com/thalesgroup-cert/vt_tool/stargazers)
 
-This tool retrieves analysis information for a set of values (IP addresses, hashes, URLs, domains) from VirusTotal. It simplifies and speeds up the analysis of files, such as log files, by automatically querying VirusTotal for any relevant data.
+Welcome to VT_Tool by THA-CERT!
 
-## Goals
+> VirusTotal analysis tool with local caching and optional MISP integration.
 
-The primary goal of this tool is to assist in the identification and analysis of IP addresses, hashes, and URLs within files using regular expressions (RegEx). The tool checks whether these objects have been previously submitted to VirusTotal and retrieves their reports. If an object has not been submitted, the tool will not submit it for analysis.
+`vt_tool` retrieves analysis information for IP addresses, hashes, URLs, and domains using the VirusTotal v3 API.
+It supports interactive and non-interactive modes, local result caching via SQLite, structured CSV/TXT export, and MISP integration.
 
-This tool is particularly useful for:
+## Features
 
-- Investigating files during incident response or threat hunting.
-- Quickly identifying suspicious elements in large datasets.
-- Simplifying data export to platforms like MISP, StrangeBee's TheHive, or others.
+* Query VirusTotal for:
 
-Results are sorted by object category and saved into two files:
-1. **TXT File**: A condensed version of the VirusTotal report, highlighting the most relevant findings.
-2. **CSV File**: A detailed report that can be converted to JSON for easy integration with other tools.
+  * IPv4 addresses
+  * File hashes (MD5, SHA-1, SHA-256)
+  * URLs
+  * Domains
+* Automatic quota checking (hourly VT API quota)
+* Local SQLite caching (avoids re-querying existing values)
+* CSV and TXT report generation
+* Template-based input processing
+* Optional MISP event creation/update
+* Proxy support
+* Interactive CLI (Rich UI)
+* Fully non-interactive automation mode
 
-If desired, the results can also be sent directly to MISP using the script’s options, with Docker integration available by default.
+## Architecture Overview
+
+```txt
+CLI (argparse)
+   │
+   ├── Input Handling (file / template / CLI args)
+   ├── Validator (IP / hash / URL / domain)
+   ├── Local SQLite cache
+   ├── VirusTotal API v3 client
+   ├── Report processing
+   │     ├── CSV export
+   │     └── TXT formatted report
+   └── Optional MISP integration
+```
+
+## Requirements
+
+* Python 3.8+
+* VirusTotal API key
+* Internet access
+* Optional: MISP instance (for integration)
+
+Dependencies are listed in `requirements.txt`.
 
 ## Installation
 
-### Prerequisites
+```bash
+git clone https://github.com/thalesgroup-cert/vt_tool.git
+cd vt_tool
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-Ensure you have Python 3.9 or later installed on your system.
+## Configuration
 
-### Steps
+### 1️⃣ VirusTotal API Key
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/thalesgroup-cert/vt_tool.git
-   ```
+You can provide the API key in one of three ways:
 
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+#### Option A — Environment variable (recommended)
 
-3. The script is now ready to run!
+```bash
+export VTAPIKEY="your_api_key"
+```
+
+#### Option B — CLI argument
+
+```bash
+--api_key YOUR_KEY
+```
+
+#### Option C — API key file
+
+```bash
+--api_key_file path/to/keyfile.txt
+```
+
+> You cannot use both `--api_key` and `--api_key_file` at the same time.
+
+### 2️⃣ Proxy (optional)
+
+```bash
+--proxy http://127.0.0.1:8080
+```
 
 ## Usage
 
-### Command-Line Interface
-
-The tool can be used in several ways, depending on your needs:
-
-#### Basic Usage
-
 ```bash
-usage: vt_tools.py [-h] [--input_file INPUT_FILE] [--case_id CASE_ID] [--api_key API_KEY]
-                    [--api_key_file API_KEY_FILE] [--proxy PROXY]
-                    [values ...]
+python vt_tools.py [OPTIONS] VALUES...
 ```
 
-- **values**: The values to analyze (IP addresses, hashes, URLs, domains).
+If no values or input file are provided, execution stops with error.
 
-#### Options
+## CLI Arguments (Complete Reference)
 
-- `-h, --help`: Show this help message and exit.
-- `-f, --input_file INPUT_FILE`: Specify the input file containing values to analyze.
-- `-c, --case_id CASE_ID`: Specify the case ID (or MISP event UUID) for which to create or update a report.
-- `-a, --api_key API_KEY`: Provide the VirusTotal API key (if not set as an environment variable).
-- `-af, --api_key_file API_KEY_FILE`: Path to a file containing the VirusTotal API key.
-- `-p, --proxy PROXY`: Specify a proxy to use for requests.
+| Option              | Short | Description                                                                            |
+| ------------------- | ----- | -------------------------------------------------------------------------------------- |
+| `--template_file`   | `-tf` | Template file to use for structured IOC input.                                         |
+| `--input_file`      | `-f`  | File containing IOCs to analyze.                                                       |
+| `--output_dir`      | `-o`  | Directory where output reports are saved.                                              |
+| `--type`            | `-t`  | Type of values to analyze: `ips`, `hashes`, `urls`, `domains`, `all` (default: `all`). |
+| `--non_interactive` | `-n`  | Disable interactive prompts. Required for automation.                                  |
+| `--case_id`         | `-c`  | Case ID or MISP event UUID (zero-padded to 6 digits).                                  |
+| `--api_key`         | `-a`  | VirusTotal API key.                                                                    |
+| `--api_key_file`    | `-af` | Path to file containing API key.                                                       |
+| `--proxy`           | `-p`  | Proxy URL for outbound requests.                                                       |
+| `values`            | —     | One or more IPs, hashes, URLs, or domains.                                             |
 
-### Examples
+## Supported Types
 
-1. **Display help:**
-   ```bash
-   python3 vt_tools.py -h
-   ```
+| Type         | CLI Value |
+| ------------ | --------- |
+| IP addresses | `ips`     |
+| File hashes  | `hashes`  |
+| URLs         | `urls`    |
+| Domains      | `domains` |
+| All types    | `all`     |
 
-2. **Basic Analysis:**
-   ```bash
-   python3 vt_tools.py --case_id <Case ID> [INPUT_VALUE]
-   ```
+## Input Methods
 
-3. **Input-based Analysis with API Key:**
-   ```bash
-   python3 vt_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> [INPUT_VALUE]
-   ```
+### 1️⃣ Direct CLI values
 
-4. **File-based Analysis:**
-   ```bash
-   python3 vt_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> --input_file <Path to file>
-   ```
+```bash
+python vt_tools.py -t ips 8.8.8.8 1.1.1.1
+```
 
-5. **Using API Key from a File:**
-   ```bash
-   python3 vt_tools.py --api_key_file <Path to APIKEY file> --case_id <Case ID> --input_file <Path to file>
-   ```
+### 2️⃣ Input file
 
-6. **Using a Proxy:**
-   ```bash
-   python3 vt_tools.py --api_key <Your VT APIKEY> --case_id <Case ID> --input_file <Path to file> --proxy <Proxy URL>
-   ```
+```bash
+python vt_tools.py -f iocs.txt
+```
+
+File format:
+
+```txt
+8.8.8.8
+example.com
+44d88612fea8a8f36de82e1278abb02f
+```
+
+### 3️⃣ Template mode
+
+```bash
+python vt_tools.py -tf template.csv
+```
+
+Template options available:
+
+| Option | Template Structure                           |
+| ------ | -------------------------------------------- |
+| 1      | value,comment                                |
+| 2      | value,comment,source                         |
+| 3      | value,category,type,comment,to_ids,tag1,tag2 |
+
+Interactive selection will prompt template choice.
+
+## Interactive vs Non-Interactive Mode
+
+### Interactive (default)
+
+* Prompts for analysis type
+* Prompts for MISP integration
+* Displays Rich UI panels
+
+### Non-Interactive
+
+```bash
+python vt_tools.py -n -t ips -f iocs.txt
+```
+
+* No prompts
+* No MISP interactive selection
+* Logging output instead of Rich prompts
+
+## Quota Handling
+
+Before analysis begins:
+
+* The tool queries VirusTotal hourly quota.
+* If quota is exhausted, execution stops.
+* If requested IOCs exceed remaining quota, a warning is shown.
+* Already cached IOCs do **not consume quota**.
+
+## Local Database
+
+* SQLite database: `vttools.sqlite`
+* Automatically created if not present
+* Prevents re-querying existing values
+* Skips:
+
+  * Private IPs
+  * Loopback IPs
+  * Reserved IP ranges
+  * Unsupported hash types (SHA-224, SHA-384, SHA-512, SSDEEP)
+
+## Output
+
+For each analysis type:
+
+### 1️⃣ CSV Report
+
+Generated automatically.
+Contains structured VT results.
+
+### 2️⃣ TXT Report
+
+Formatted table version of results.
+
+Files are saved in:
+
+* Current directory (default)
+* Or `--output_dir` if provided
+
+## MISP Integration
+
+If:
+
+* Running in interactive mode
+* Or using template mode
+
+The tool can:
+
+* Create new MISP event
+* Update existing MISP event (via `--case_id`)
+
+Non-interactive mode skips MISP integration.
+
+## Example Commands
+
+### Analyze single IP
+
+```bash
+python vt_tools.py -t ips 8.8.8.8
+```
+
+### Analyze hashes from file
+
+```bash
+python vt_tools.py -t hashes -f hashes.txt
+```
+
+### Full automation mode
+
+```bash
+python vt_tools.py -n -t all -f iocs.txt --api_key YOUR_KEY
+```
+
+### Using template mode
+
+```bash
+python vt_tools.py -tf template.csv -c 123456
+```
+
+## Error Handling
+
+The tool handles:
+
+* Invalid IOCs
+* Unsupported value types
+* Quota exhaustion
+* API failures
+* Network errors
+* Duplicate DB entries
+
+Errors are counted and reported at the end of execution.
+
+## Exit Behavior
+
+Execution ends with:
+
+* Total time taken
+* Remaining quota
+* Number of skipped values
+* Number of errors
+
+## Logging
+
+* INFO level logging enabled by default
+* Errors logged to console
+* In non-interactive mode, logs replace UI prompts
+
+## Security Considerations
+
+* API keys are never logged
+* Proxy support for controlled outbound traffic
+* Local DB prevents unnecessary API calls
+* Invalid or sensitive IP ranges are filtered
+
+## Development
+
+### Run directly
+
+```bash
+python vt_tools.py --help
+```
+
+### Code structure highlights
+
+* `Initializator` → handles DB, validator, reporter
+* `ValueReader` → parses input/template files
+* `db_handler` → manages SQLite
+* `reporter` → calls VT API
+* `validator` → validates IOC format
+
+## License
+
+See `LICENSE` file.

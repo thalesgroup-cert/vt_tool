@@ -1,0 +1,70 @@
+services:
+  db:
+    init: true
+    ports:
+      - "127.0.0.1:${DB_PORT}:3306"
+    restart: always
+    command: "\
+      --innodb-buffer-pool-size=${INNODB_BUFFER_POOL_SIZE:-2048M} \
+      --innodb-change-buffering=${INNODB_CHANGE_BUFFERING:-none} \
+      --innodb-io-capacity=${INNODB_IO_CAPACITY:-1000} \
+      --innodb-io-capacity-max=${INNODB_IO_CAPACITY_MAX:-2000} \
+      --innodb-log-file-size=${INNODB_LOG_FILE_SIZE:-600M} \
+      --innodb-read-io-threads=${INNODB_READ_IO_THREADS:-16} \
+      --innodb-stats-persistent=${INNODB_STATS_PERSISTENT:-ON} \
+      --innodb-write-io-threads=${INNODB_WRITE_IO_THREADS:-4}"
+    volumes:
+      - db_data:/var/lib/mysql:Z
+      - db_log:/var/log/mysql
+    cap_add:
+      - SYS_NICE
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    networks:
+      - vt_tool_network
+
+  redis:
+    init: true
+    restart: always
+    command: |
+      sh -c '
+        if [ "$${ENABLE_REDIS_EMPTY_PASSWORD:-false}" = "true" ]; then
+          exec valkey-server
+        else
+          exec valkey-server --requirepass "$${REDIS_PASSWORD:-redispassword}"
+        fi
+      '
+    environment:
+      - "ENABLE_REDIS_EMPTY_PASSWORD=${ENABLE_REDIS_EMPTY_PASSWORD:-false}"
+      - "REDIS_PASSWORD=${REDIS_PASSWORD:-redispassword}"
+    healthcheck:
+      test: |
+        sh -c '
+          if [ "$${ENABLE_REDIS_EMPTY_PASSWORD:-false}" = "true" ]; then
+            valkey-cli -p $${REDIS_PORT:-6379} ping | grep -q PONG || exit 1
+          else
+            valkey-cli -a "$${REDIS_PASSWORD:-redispassword}" -p $${REDIS_PORT:-6379} ping | grep -q PONG || exit 1
+          fi
+        '
+      interval: 2s
+      timeout: 1s
+      retries: 3
+      start_period: 5s
+      start_interval: 5s
+    volumes:
+      - cache_data:/data:Z
+    networks:
+      - vt_tool_network
+
+volumes:
+  db_data:
+  db_log:
+  cache_data:
+
+networks:
+  vt_tool_network:
+    external: true
+    name: ${NETWORK_NAME}
