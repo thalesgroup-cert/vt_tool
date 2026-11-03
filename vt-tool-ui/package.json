@@ -28,7 +28,7 @@
     "react-dropzone": "15.0.0",
     "react-hook-form": "7.76.0",
     "react-router-dom": "7.18.2",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
